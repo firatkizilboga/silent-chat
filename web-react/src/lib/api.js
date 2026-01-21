@@ -1,0 +1,555 @@
+/**
+ * SilentChat - API Functions
+ * Server communication with AbortController support
+ * Updated for ID-based polling and FILE message type
+ */
+
+import { SERVER_URL } from './config.js';
+import { showNotification } from './utils.js';
+import {
+    generateKeyPair,
+    exportPublicKeyPem,
+    signData,
+    verifySignature,
+    importPeerPublicKey,
+    encryptAesKey,
+    decryptAesKey,
+    generateAesKey,
+    encryptMessage,
+    decryptMessage
+} from './crypto.js';
+import { db, saveState, saveKeys, loadKeys } from './storage.js';
+
+// ========================================
+// Base API Request with AbortController
+// ========================================
+export async function apiRequest(endpoint, options = {}, token = null, signal = null) {
+    const url = `${SERVER_URL}${endpoint}`;
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+
+    if (token && !options.noAuth) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const fetchOptions = { ...options, headers };
+    if (signal) {
+        fetchOptions.signal = signal;
+    }
+
+    const response = await fetch(url, fetchOptions);
+    return response;
+}
+
+// ========================================
+// Authentication
+// ========================================
+export async function registerAndLogin(alias, setStatus) {
+    const loadedKeys = await loadKeys(alias);
+    let keyPair, publicKeyPem;
+
+    if (!loadedKeys) {
+        setStatus?.("Generating encryption keys...");
+        keyPair = await generateKeyPair();
+        publicKeyPem = await exportPublicKeyPem(keyPair.publicKeySpki);
+
+        await saveKeys(alias, keyPair);
+
+        setStatus?.("Registering identity...");
+        const chalRes = await apiRequest('/auth/register-challenge', {
+            method: 'POST',
+            body: JSON.stringify({ alias }),
+            noAuth: true
+        });
+
+        if (!chalRes.ok) throw new Error("Failed to get registration challenge");
+        const { nonce } = await chalRes.json();
+
+        const signedNonce = await signData(keyPair.signPrivateKey, nonce);
+
+        const regRes = await apiRequest('/auth/register-complete', {
+            method: 'POST',
+            body: JSON.stringify({
+                alias,
+                publicKey: publicKeyPem,
+                signedNonce
+            }),
+            noAuth: true
+        });
+
+        if (!regRes.ok && regRes.status !== 409) {
+            throw new Error("Registration failed");
+        }
+    } else {
+        keyPair = loadedKeys.keyPair;
+        publicKeyPem = loadedKeys.publicKeyPem;
+        setStatus?.("Using existing identity...");
+    }
+
+    setStatus?.("Logging in...");
+    let loginChalRes = await apiRequest('/auth/login-challenge', {
+        method: 'POST',
+        body: JSON.stringify({ alias }),
+        noAuth: true
+    });
+
+    if (loginChalRes.status === 404) {
+        console.log("User not found on server, re-registering with existing keys...");
+        setStatus?.("User not found, re-registering...");
+
+        if (!publicKeyPem && keyPair) {
+            publicKeyPem = await exportPublicKeyPem(keyPair.publicKeySpki);
+        }
+
+        const chalRes = await apiRequest('/auth/register-challenge', {
+            method: 'POST',
+            body: JSON.stringify({ alias }),
+            noAuth: true
+        });
+
+        if (!chalRes.ok) throw new Error("Failed to get registration challenge");
+        const { nonce } = await chalRes.json();
+
+        const signedNonce = await signData(keyPair.signPrivateKey, nonce);
+
+        const regRes = await apiRequest('/auth/register-complete', {
+            method: 'POST',
+            body: JSON.stringify({
+                alias,
+                publicKey: publicKeyPem,
+                signedNonce
+            }),
+            noAuth: true
+        });
+
+        if (!regRes.ok && regRes.status !== 409) {
+            throw new Error("Re-registration failed");
+        }
+
+        setStatus?.("Logging in again...");
+        loginChalRes = await apiRequest('/auth/login-challenge', {
+            method: 'POST',
+            body: JSON.stringify({ alias }),
+            noAuth: true
+        });
+    }
+
+    if (!loginChalRes.ok) throw new Error("Failed to get login challenge");
+    const loginData = await loginChalRes.json();
+    const challenge = loginData.challenge || loginData.nonce;
+
+    const signedChallenge = await signData(keyPair.signPrivateKey, challenge);
+
+    const loginRes = await apiRequest('/auth/login-complete', {
+        method: 'POST',
+        body: JSON.stringify({ alias, signedChallenge }),
+        noAuth: true
+    });
+
+    if (!loginRes.ok) throw new Error("Login failed");
+    const { token } = await loginRes.json();
+
+    return { keyPair, publicKeyPem, token };
+}
+
+// ========================================
+// Key Exchange
+// ========================================
+export async function fetchPeerKey(targetAlias, peerPublicKeys, token) {
+    if (peerPublicKeys[targetAlias]) return peerPublicKeys[targetAlias];
+
+    try {
+        const res = await apiRequest(`/keys/${targetAlias}`, {}, token);
+        if (!res.ok) return null;
+
+        const { publicKey: pem } = await res.json();
+
+        return {
+            encrypt: await importPeerPublicKey(pem, true),
+            verify: await importPeerPublicKey(pem, false)
+        };
+    } catch (e) {
+        console.error("Failed to fetch peer key:", e);
+        return null;
+    }
+}
+
+// ========================================
+// Message Sending (TEXT)
+// ========================================
+export async function sendMessage(targetAlias, text, state, dispatch) {
+    let peerKey = state.peerPublicKeys[targetAlias];
+    if (!peerKey) {
+        peerKey = await fetchPeerKey(targetAlias, state.peerPublicKeys, state.token);
+        if (!peerKey) throw new Error("Could not fetch recipient's public key");
+        dispatch({ type: 'SET_PEER_KEY', peer: targetAlias, key: peerKey });
+    }
+
+    let session = state.activeSessions[targetAlias];
+    if (!session) {
+        const aesKey = await generateAesKey();
+        session = aesKey;
+        dispatch({ type: 'SET_SESSION', peer: targetAlias, key: aesKey });
+
+        const encryptedKey = await encryptAesKey(peerKey.encrypt, aesKey);
+        const keySig = await signData(state.keyPair.signPrivateKey, encryptedKey);
+
+        await apiRequest('/messages', {
+            method: 'POST',
+            body: JSON.stringify({
+                recipientAlias: targetAlias,
+                type: 'KEY_EXCHANGE',
+                encryptedMessage: encryptedKey,
+                signature: keySig
+            })
+        }, state.token);
+    }
+
+    const encryptedMessage = await encryptMessage(session, text);
+    const signature = await signData(state.keyPair.signPrivateKey, encryptedMessage);
+
+    await apiRequest('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+            recipientAlias: targetAlias,
+            type: 'TEXT',
+            encryptedMessage,
+            signature
+        })
+    }, state.token);
+
+    let messageObj = {
+        peer: targetAlias,
+        sender: 'Me',
+        text,
+        timestamp: Date.now()
+    };
+
+    dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
+    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature });
+
+    await db.addMessage(messageObj);
+
+    return true;
+}
+
+// ========================================
+// File Sending (FILE type)
+// ========================================
+export async function sendFile(targetAlias, file, state, dispatch) {
+    let peerKey = state.peerPublicKeys[targetAlias];
+    if (!peerKey) {
+        peerKey = await fetchPeerKey(targetAlias, state.peerPublicKeys, state.token);
+        if (!peerKey) throw new Error("Could not fetch recipient's public key");
+        dispatch({ type: 'SET_PEER_KEY', peer: targetAlias, key: peerKey });
+    }
+
+    let session = state.activeSessions[targetAlias];
+    if (!session) {
+        const aesKey = await generateAesKey();
+        session = aesKey;
+        dispatch({ type: 'SET_SESSION', peer: targetAlias, key: aesKey });
+
+        const encryptedKey = await encryptAesKey(peerKey.encrypt, aesKey);
+        const keySig = await signData(state.keyPair.signPrivateKey, encryptedKey);
+
+        await apiRequest('/messages', {
+            method: 'POST',
+            body: JSON.stringify({
+                recipientAlias: targetAlias,
+                type: 'KEY_EXCHANGE',
+                encryptedMessage: encryptedKey,
+                signature: keySig
+            })
+        }, state.token);
+    }
+
+    // Read file as base64
+    const fileData = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
+    // Create attachment object and encrypt
+    const attachment = {
+        type: file.type || 'application/octet-stream',
+        name: file.name,
+        size: file.size,
+        data: fileData
+    };
+    const encryptedContent = await encryptMessage(session, JSON.stringify(attachment));
+    const signature = await signData(state.keyPair.signPrivateKey, encryptedContent);
+
+    // Send as FILE type - server will store separately
+    await apiRequest('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+            recipientAlias: targetAlias,
+            type: 'FILE',
+            encryptedMessage: encryptedContent,
+            signature
+        })
+    }, state.token);
+
+    let messageObj = {
+        peer: targetAlias,
+        sender: 'Me',
+        text: '',
+        attachment,
+        timestamp: Date.now()
+    };
+
+    dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
+    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature });
+
+    await db.addMessage(messageObj);
+
+    return true;
+}
+
+// ========================================
+// Message Polling (ID-based)
+// ========================================
+export async function pollMessages(state, dispatch, signal) {
+    try {
+        // Use lastMessageId (integer) instead of timestamp
+        let since = state.lastMessageId || 0;
+
+        // If we have a watermark but NO local messages, reset it
+        // This handles corrupt state where watermark was kept but messages lost
+        const hasLocalMessages = Object.values(state.messages).some(arr => arr.length > 0);
+        if (since > 0 && !hasLocalMessages) {
+            console.log('[Poll] Resetting watermark - no local messages but id:', since);
+            since = 0;
+            dispatch({ type: 'SET_LAST_MESSAGE_ID', id: 0 });
+            await db.setConfig('lastMessageId', 0);
+        }
+
+        console.log('[Poll] Requesting messages since id:', since);
+        const res = await apiRequest(`/messages?since=${since}`, {}, state.token, signal);
+        if (!res.ok) {
+            console.log('[Poll] API request failed:', res.status);
+            return [];
+        }
+
+        const messages = await res.json();
+        const updatedPeers = new Set();
+        let maxId = state.lastMessageId || 0;
+
+        for (const msg of messages) {
+            // Track max ID for watermark
+            if (msg.id && msg.id > maxId) {
+                maxId = msg.id;
+            }
+
+            const sig = msg.signature;
+            if (state.seenSignatures.has(sig)) {
+                continue;
+            }
+
+            const sender = msg.senderAlias || 'Unknown';
+            if (sender === state.alias) {
+                dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                continue;
+            }
+
+            console.log('[Poll] Processing new message from:', sender, 'type:', msg.type, 'id:', msg.id);
+
+            if (document.hidden && (msg.type === 'TEXT' || msg.type === 'FILE')) {
+                showNotification(`New message from ${sender}`, "You have a new encrypted message");
+            }
+
+            // Fetch sender's key if needed
+            let peerKey = state.peerPublicKeys[sender];
+            if (!peerKey) {
+                peerKey = await fetchPeerKey(sender, state.peerPublicKeys, state.token);
+                if (!peerKey) {
+                    console.log('[Poll] Could not fetch key for:', sender, '- aborting batch');
+                    break;
+                }
+                dispatch({ type: 'SET_PEER_KEY', peer: sender, key: peerKey });
+            }
+
+            // Verify signature (skip for FILE type - we verify on fetched content)
+            if (msg.type !== 'FILE') {
+                const verified = await verifySignature(peerKey.verify, msg.encryptedMessage, sig);
+                if (!verified) {
+                    console.log('[Poll] Signature verification failed for:', sender);
+                    continue;
+                }
+            }
+
+            if (msg.type === 'KEY_EXCHANGE') {
+                try {
+                    console.log('[Poll] Processing key exchange from:', sender);
+                    const aesKey = await decryptAesKey(state.keyPair.encryptPrivateKey, msg.encryptedMessage);
+                    dispatch({ type: 'SET_SESSION', peer: sender, key: aesKey });
+                    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                    dispatch({ type: 'INIT_PEER', peer: sender });
+                    updatedPeers.add(sender);
+                    console.log('[Poll] Key exchange successful with:', sender);
+
+                    // Process pending messages
+                    const pending = state.pendingMessages[sender];
+                    if (pending && pending.length > 0) {
+                        console.log(`[Pending] Processing ${pending.length} messages for ${sender}`);
+                        for (const pendingMsg of pending) {
+                            await processTextOrFileMessage(pendingMsg, sender, aesKey, dispatch, state);
+                        }
+                        dispatch({ type: 'CLEAR_PENDING', peer: sender });
+                        updatedPeers.add(sender);
+                    }
+                } catch (e) {
+                    console.error("Key exchange failed:", e);
+                }
+            } else if (msg.type === 'TEXT') {
+                const session = state.activeSessions[sender];
+                if (!session) {
+                    console.log('[Poll] No active session for:', sender, 'queueing message');
+                    dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
+                    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                    continue;
+                }
+
+                try {
+                    const text = await decryptMessage(session, msg.encryptedMessage);
+                    console.log('[Poll] Decrypted message from:', sender);
+
+                    let messageObj = {
+                        peer: sender,
+                        sender,
+                        text,
+                        timestamp: msg.timestamp || Date.now(),
+                        msgId: msg.id
+                    };
+
+                    // Backward compatibility: detect embedded attachments in TEXT messages
+                    // (from old vanilla JS version that sent files as TEXT with JSON)
+                    try {
+                        const parsed = JSON.parse(text);
+                        if (parsed.attachment) {
+                            messageObj.attachment = parsed.attachment;
+                            messageObj.text = '';
+                        }
+                    } catch {
+                        // Not JSON, just regular text - that's fine
+                    }
+
+                    dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
+                    await db.addMessage(messageObj);
+                    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                    updatedPeers.add(sender);
+                } catch (e) {
+                    console.error("Decryption failed:", e);
+                }
+            } else if (msg.type === 'FILE') {
+                const session = state.activeSessions[sender];
+                if (!session) {
+                    console.log('[Poll] No active session for FILE from:', sender, 'queueing');
+                    dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
+                    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                    continue;
+                }
+
+                try {
+                    // The encryptedMessage contains a reference to the file
+                    const { fileId } = JSON.parse(msg.encryptedMessage);
+                    console.log('[Poll] Fetching file:', fileId);
+
+                    // Fetch the actual encrypted content
+                    const fileRes = await apiRequest(`/files/${fileId}`, {}, state.token, signal);
+                    if (!fileRes.ok) {
+                        console.error('[Poll] Failed to fetch file:', fileId);
+                        continue;
+                    }
+
+                    const { encryptedContent } = await fileRes.json();
+
+                    // Verify signature on the actual encrypted content
+                    const verified = await verifySignature(peerKey.verify, encryptedContent, sig);
+                    if (!verified) {
+                        console.log('[Poll] FILE signature verification failed for:', sender);
+                        continue;
+                    }
+
+                    const decrypted = await decryptMessage(session, encryptedContent);
+                    const attachment = JSON.parse(decrypted);
+
+                    let messageObj = {
+                        peer: sender,
+                        sender,
+                        text: '',
+                        attachment,
+                        timestamp: msg.timestamp || Date.now(),
+                        msgId: msg.id
+                    };
+
+                    dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
+                    await db.addMessage(messageObj);
+                    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                    updatedPeers.add(sender);
+                    console.log('[Poll] File received from:', sender);
+                } catch (e) {
+                    console.error("File decryption failed:", e);
+                }
+            }
+        }
+
+        // Update watermark with max ID
+        if (maxId > (state.lastMessageId || 0)) {
+            dispatch({ type: 'SET_LAST_MESSAGE_ID', id: maxId });
+            await db.setConfig('lastMessageId', maxId);
+            console.log('[Poll] Updated watermark to id:', maxId);
+        }
+
+        await db.setConfig('seenSignatures', Array.from(state.seenSignatures));
+
+        return Array.from(updatedPeers);
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            console.log('[Poll] Request aborted');
+            return [];
+        }
+        console.error("Poll error:", e);
+        return [];
+    }
+}
+
+// Helper to process TEXT/FILE messages (used for pending queue too)
+async function processTextOrFileMessage(msg, sender, session, dispatch, state) {
+    try {
+        if (msg.type === 'FILE') {
+            const { fileId } = JSON.parse(msg.encryptedMessage);
+            const fileRes = await apiRequest(`/files/${fileId}`, {}, state.token);
+            if (!fileRes.ok) return;
+            const { encryptedContent } = await fileRes.json();
+            const decrypted = await decryptMessage(session, encryptedContent);
+            const attachment = JSON.parse(decrypted);
+
+            let messageObj = {
+                peer: sender,
+                sender,
+                text: '',
+                attachment,
+                timestamp: msg.timestamp || Date.now(),
+                msgId: msg.id
+            };
+            dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
+            await db.addMessage(messageObj);
+        } else {
+            const text = await decryptMessage(session, msg.encryptedMessage);
+            let messageObj = {
+                peer: sender,
+                sender,
+                text,
+                timestamp: msg.timestamp || Date.now(),
+                msgId: msg.id
+            };
+            dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
+            await db.addMessage(messageObj);
+        }
+    } catch (e) {
+        console.error("[Process] Message failed:", e);
+    }
+}
