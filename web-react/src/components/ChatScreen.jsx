@@ -2,7 +2,7 @@
  * SilentChat - Chat Screen Component
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import Sidebar from './Sidebar';
 import MessageList from './MessageList';

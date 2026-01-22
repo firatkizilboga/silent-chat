@@ -95,7 +95,7 @@ def test_get_messages_authenticated(client: TestClient, registered_bob):
     """
     bob_token = get_jwt_for_user(client, registered_bob)
     headers = {"Authorization": f"Bearer {bob_token}"}
-    response = client.get("/messages", headers=headers)
+    response = client.get("/messages?timeout_seconds=0", headers=headers)
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
@@ -124,7 +124,7 @@ def test_user_cannot_get_others_messages(client: TestClient, registered_alice, r
 
     # 3. Alice logs in again and should see zero messages
     alice_token_again = get_jwt_for_user(client, registered_alice)
-    response = client.get("/messages", headers={"Authorization": f"Bearer {alice_token_again}"})
+    response = client.get("/messages?timeout_seconds=0", headers={"Authorization": f"Bearer {alice_token_again}"})
     assert response.status_code == 200
     alice_messages = response.json()
     assert len(alice_messages) == 0
