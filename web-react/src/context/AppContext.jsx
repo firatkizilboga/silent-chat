@@ -2,10 +2,11 @@
  * SilentChat - App Context
  * Global state management with React Context + useReducer
  */
+/* eslint-disable react-refresh/only-export-components */
 
-import { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
+import { createContext, useContext, useReducer, useEffect, useRef } from 'react';
 import { loadState, saveState as persistState, db, loadKeys, saveKeys } from '../lib/storage.js';
-import { registerAndLogin, pollMessages } from '../lib/api.js';
+import { registerAndLogin, pollMessages, connectWebSocket, sendWebSocketPing, handleIncomingMessage, processTextOrFileMessage } from '../lib/api.js';
 
 const AppContext = createContext(null);
 
@@ -30,6 +31,7 @@ const initialState = {
     // Status
     isLoggedIn: false,
     isLoading: true,
+    isWsConnected: false,
     loginStatus: '',
     loginError: null
 };
@@ -46,6 +48,9 @@ function appReducer(state, action) {
                 isLoggedIn: true,
                 isLoading: false
             };
+
+        case 'SET_WS_CONNECTED':
+            return { ...state, isWsConnected: action.connected };
 
         case 'LOGIN_SUCCESS':
             return {
@@ -129,9 +134,10 @@ function appReducer(state, action) {
             };
         }
 
-        case 'CLEAR_PENDING':
+        case 'CLEAR_PENDING': {
             const { [action.peer]: _, ...rest } = state.pendingMessages;
             return { ...state, pendingMessages: rest };
+        }
 
         default:
             return state;
@@ -140,10 +146,7 @@ function appReducer(state, action) {
 
 export function AppProvider({ children }) {
     const [state, dispatch] = useReducer(appReducer, initialState);
-    const abortControllerRef = useRef(null);
-    const pollingIntervalRef = useRef(null);
     const stateRef = useRef(state);
-    const isPollingRef = useRef(false);
 
     // Keep stateRef in sync
     useEffect(() => {
@@ -155,7 +158,7 @@ export function AppProvider({ children }) {
         if (state.isLoggedIn && state.alias) {
             persistState(state);
         }
-    }, [state.messages, state.seenSignatures, state.lastMessageId, state.activeSessions, state.pendingMessages]);
+    }, [state.messages, state.seenSignatures, state.lastMessageId, state.activeSessions, state.pendingMessages, state.isLoggedIn, state.alias]);
 
     // Load saved state on mount
     useEffect(() => {
@@ -184,58 +187,23 @@ export function AppProvider({ children }) {
         init();
     }, []);
 
-    // Polling effect - handles StrictMode properly
+    // Process pending messages when session is available
     useEffect(() => {
-        // Only poll when logged in with keys
-        if (!state.isLoggedIn || !state.keyPair) {
-            return;
-        }
+        Object.keys(state.activeSessions).forEach(peer => {
+            const pending = state.pendingMessages[peer];
+            if (pending && pending.length > 0) {
+                console.log(`[Pending] Processing ${pending.length} messages for ${peer}`);
+                const session = state.activeSessions[peer];
 
-        let isMounted = true;
-        let intervalId = null;
-        let currentAbort = null;
+                // Process each message
+                pending.forEach(async (msg) => {
+                    await processTextOrFileMessage(msg, peer, session, dispatch, state);
+                });
 
-        const poll = async () => {
-            if (!isMounted) return;
-
-            // Skip if already polling
-            if (isPollingRef.current) {
-                return;
+                dispatch({ type: 'CLEAR_PENDING', peer });
             }
-
-            isPollingRef.current = true;
-            currentAbort = new AbortController();
-
-            try {
-                console.log('[Poll] Starting poll...');
-                await pollMessages(stateRef.current, dispatch, currentAbort.signal);
-            } catch (e) {
-                if (e.name !== 'AbortError' && isMounted) {
-                    console.error('Poll error:', e);
-                }
-            } finally {
-                isPollingRef.current = false;
-            }
-        };
-
-        // Start polling
-        console.log('[Poll] Starting polling interval');
-        poll(); // Initial poll
-        intervalId = setInterval(poll, 2000);
-
-        // Cleanup on unmount or dependency change
-        return () => {
-            isMounted = false;
-            if (intervalId) {
-                clearInterval(intervalId);
-            }
-            if (currentAbort) {
-                currentAbort.abort();
-            }
-            isPollingRef.current = false;
-            console.log('[Poll] Cleanup');
-        };
-    }, [state.isLoggedIn, state.keyPair]);
+        });
+    }, [state.activeSessions, state.pendingMessages]);
 
     const login = async (alias) => {
         dispatch({ type: 'LOGIN_STATUS', status: 'Connecting...' });
@@ -270,6 +238,127 @@ export function AppProvider({ children }) {
         sessionStorage.clear();
         dispatch({ type: 'LOGOUT' });
     };
+
+    // Connection effect - WebSocket + Polling fallback
+    useEffect(() => {
+        if (!state.isLoggedIn || !state.keyPair || !state.token) {
+            return;
+        }
+
+        let isMounted = true;
+        let ws = null;
+        let pingInterval = null;
+        let pollInterval = null;
+        let currentAbort = null;
+        let reconnectTimeout = null;
+
+        const startPolling = () => {
+            if (pollInterval) return;
+            console.log('[Conn] Falling back to polling');
+
+            const poll = async () => {
+                if (!isMounted) return;
+                currentAbort = new AbortController();
+                try {
+                    await pollMessages(stateRef.current, dispatch, currentAbort.signal);
+                } catch (e) {
+                    if (e.message === "AUTH_EXPIRED") {
+                        console.log('[Conn] Session expired, re-authenticating...');
+                        await login(stateRef.current.alias);
+                    } else if (e.name !== 'AbortError' && isMounted) {
+                        console.error('Poll error:', e);
+                    }
+                }
+            };
+
+            poll(); // Initial
+            pollInterval = setInterval(poll, 3000); // Slower poll for fallback
+        };
+
+        const stopPolling = () => {
+            if (pollInterval) {
+                console.log('[Conn] Stopping polling (WS connected)');
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+            if (currentAbort) {
+                currentAbort.abort();
+                currentAbort = null;
+            }
+        };
+
+        const connect = () => {
+            if (!isMounted) return;
+
+            console.log('[Conn] Connecting WebSocket...');
+            ws = connectWebSocket(
+                state.token,
+                (msg) => { // onMessage
+                    handleIncomingMessage(msg, stateRef.current, dispatch);
+                },
+                () => { // onError
+                    // Error will trigger close
+                },
+                () => { // onClose
+                    if (!isMounted) return;
+                    console.log('[WS] Disconnected');
+                    dispatch({ type: 'SET_WS_CONNECTED', connected: false });
+                    stopPing();
+
+                    // Fallback to polling immediately
+                    startPolling();
+
+                    // Try to reconnect after delay
+                    reconnectTimeout = setTimeout(connect, 5000);
+                }
+            );
+
+            const originalOpen = ws.onopen;
+            ws.onopen = () => {
+                if (originalOpen) originalOpen();
+                if (!isMounted) return;
+                console.log('[WS] Connection established');
+                dispatch({ type: 'SET_WS_CONNECTED', connected: true });
+                stopPolling();
+
+                // Sync missed messages (offline catch-up)
+                // Use a temporary controller for this one-off request
+                const syncAbort = new AbortController();
+                pollMessages(stateRef.current, dispatch, syncAbort.signal)
+                    .catch(e => console.error('[Sync] Failed:', e));
+
+                startPing();
+            };
+        };
+
+        const startPing = () => {
+            stopPing();
+            pingInterval = setInterval(() => {
+                sendWebSocketPing(ws);
+            }, 30000);
+        };
+
+        const stopPing = () => {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        };
+
+        // Initial connect
+        connect();
+
+        return () => {
+            isMounted = false;
+            if (ws) {
+                ws.onclose = null; // Prevent reconnect loop
+                ws.close();
+            }
+            stopPing();
+            stopPolling();
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        };
+    }, [state.isLoggedIn, state.keyPair, state.token]);
 
     const value = {
         state,

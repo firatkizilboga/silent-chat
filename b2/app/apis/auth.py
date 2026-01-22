@@ -15,8 +15,8 @@ router = APIRouter()
 challenge_storage = {}
 
 @router.post("/register-challenge", response_model=ChallengeResponse)
-def register_challenge(request: AliasRequest):
-    if db.get_user(request.alias):
+async def register_challenge(request: AliasRequest):
+    if await db.get_user(request.alias):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Alias already taken")
     
     nonce = secrets.token_urlsafe(32)
@@ -27,7 +27,7 @@ def register_challenge(request: AliasRequest):
     return ChallengeResponse(nonce=nonce)
 
 @router.post("/register-complete", status_code=status.HTTP_201_CREATED)
-def register_complete(request: RegisterCompleteRequest):
+async def register_complete(request: RegisterCompleteRequest):
     alias = request.alias
     challenge_info = challenge_storage.get(alias)
 
@@ -46,14 +46,14 @@ def register_complete(request: RegisterCompleteRequest):
     except (ValueError, TypeError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid public key or signature format")
 
-    db.add_user({"alias": alias, "publicKey": request.publicKey})
+    await db.add_user({"alias": alias, "publicKey": request.publicKey})
     del challenge_storage[alias]
 
     return {"message": "User registered successfully"}
 
 @router.post("/login-challenge", response_model=ChallengeResponse)
-def login_challenge(request: AliasRequest):
-    if not db.get_user(request.alias):
+async def login_challenge(request: AliasRequest):
+    if not await db.get_user(request.alias):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     nonce = secrets.token_urlsafe(32)
@@ -65,10 +65,10 @@ def login_challenge(request: AliasRequest):
     return ChallengeResponse(nonce=nonce)
 
 @router.post("/login-complete", response_model=TokenResponse)
-def login_complete(request: LoginCompleteRequest):
+async def login_complete(request: LoginCompleteRequest):
     alias = request.alias
     challenge_info = challenge_storage.get(alias)
-    user_info = db.get_user(alias)
+    user_info = await db.get_user(alias)
 
     if not user_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")

@@ -11,8 +11,7 @@ export default function Sidebar({
     messages,
     alias,
     onSelectPeer,
-    onCreateChat,
-    onLogout
+    onCreateChat
 }) {
     const [newChatInput, setNewChatInput] = useState('');
     const peers = Object.keys(messages);
@@ -82,9 +81,6 @@ export default function Sidebar({
 
             <div className="sidebar-footer">
                 <span className="footer-user">@{alias}</span>
-                <button className="footer-logout" onClick={onLogout}>
-                    Sign out
-                </button>
             </div>
         </aside>
     );

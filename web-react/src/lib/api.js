@@ -18,7 +18,7 @@ import {
     encryptMessage,
     decryptMessage
 } from './crypto.js';
-import { db, saveState, saveKeys, loadKeys } from './storage.js';
+import { db, saveKeys, loadKeys } from './storage.js';
 
 // ========================================
 // Base API Request with AbortController
@@ -328,6 +328,10 @@ export async function pollMessages(state, dispatch, signal) {
 
         console.log('[Poll] Requesting messages since id:', since);
         const res = await apiRequest(`/messages?since=${since}`, {}, state.token, signal);
+        if (res.status === 401) {
+            console.log('[Poll] Token expired (401)');
+            throw new Error("AUTH_EXPIRED");
+        }
         if (!res.ok) {
             console.log('[Poll] API request failed:', res.status);
             return [];
@@ -517,7 +521,7 @@ export async function pollMessages(state, dispatch, signal) {
 }
 
 // Helper to process TEXT/FILE messages (used for pending queue too)
-async function processTextOrFileMessage(msg, sender, session, dispatch, state) {
+export async function processTextOrFileMessage(msg, sender, session, dispatch, state) {
     try {
         if (msg.type === 'FILE') {
             const { fileId } = JSON.parse(msg.encryptedMessage);
@@ -553,3 +557,147 @@ async function processTextOrFileMessage(msg, sender, session, dispatch, state) {
         console.error("[Process] Message failed:", e);
     }
 }
+
+// Shared message handler for WebSocket and Polling
+export async function handleIncomingMessage(msg, state, dispatch) {
+    if (state.seenSignatures.has(msg.signature)) return;
+
+    const sender = msg.senderAlias || 'Unknown';
+    if (sender === state.alias) {
+        dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+        return;
+    }
+
+    // console.log('[MSG] Processing from:', sender, 'id:', msg.id);
+
+    if (document.hidden && (msg.type === 'TEXT' || msg.type === 'FILE')) {
+        showNotification(`New message from ${sender}`, "You have a new encrypted message");
+    }
+
+    let peerKey = state.peerPublicKeys[sender];
+    if (!peerKey) {
+        peerKey = await fetchPeerKey(sender, state.peerPublicKeys, state.token);
+        if (!peerKey) {
+            console.log('[MSG] Could not fetch key for:', sender);
+            return;
+        }
+        dispatch({ type: 'SET_PEER_KEY', peer: sender, key: peerKey });
+    }
+
+    // Verify signature (skip for FILE type - we verify on fetched content)
+    if (msg.type !== 'FILE') {
+        const verified = await verifySignature(peerKey.verify, msg.encryptedMessage, msg.signature);
+        if (!verified) {
+            console.log('[MSG] Signature verification failed for:', sender);
+            return;
+        }
+    }
+
+    if (msg.type === 'KEY_EXCHANGE') {
+        try {
+            const aesKey = await decryptAesKey(state.keyPair.encryptPrivateKey, msg.encryptedMessage);
+            dispatch({ type: 'SET_SESSION', peer: sender, key: aesKey });
+            dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+            dispatch({ type: 'INIT_PEER', peer: sender });
+            // Pending messages will be handled by AppContext useEffect
+        } catch (e) {
+            console.error("Key exchange failed:", e);
+        }
+    } else if (msg.type === 'TEXT') {
+        const session = state.activeSessions[sender];
+        if (!session) {
+            dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
+            dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+            return;
+        }
+        await processTextOrFileMessage(msg, sender, session, dispatch, state);
+        dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+    } else if (msg.type === 'FILE') {
+        const session = state.activeSessions[sender];
+        if (!session) {
+            dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
+            dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+            return;
+        }
+
+        try {
+            const { fileId } = JSON.parse(msg.encryptedMessage);
+            const fileRes = await apiRequest(`/files/${fileId}`, {}, state.token);
+            if (!fileRes.ok) return;
+
+            const { encryptedContent } = await fileRes.json();
+            const verified = await verifySignature(peerKey.verify, encryptedContent, msg.signature);
+            if (!verified) {
+                console.log('[MSG] FILE signature verification failed');
+                return;
+            }
+
+            const decrypted = await decryptMessage(session, encryptedContent);
+            const attachment = JSON.parse(decrypted);
+
+            let messageObj = {
+                peer: sender,
+                sender,
+                text: '',
+                attachment,
+                timestamp: msg.timestamp || Date.now(),
+                msgId: msg.id
+            };
+            dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
+            await db.addMessage(messageObj);
+            dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+        } catch (e) {
+            console.error("File processing failed:", e);
+        }
+    }
+
+    if (msg.id > (state.lastMessageId || 0)) {
+        dispatch({ type: 'SET_LAST_MESSAGE_ID', id: msg.id });
+        await db.setConfig('lastMessageId', msg.id);
+    }
+}
+
+// ========================================
+// WebSocket Connection
+// ========================================
+import { WS_URL } from './config.js';
+
+export function connectWebSocket(token, onMessage, onError, onClose) {
+    const ws = new WebSocket(`${WS_URL}/ws?token=${token}`);
+
+    ws.onopen = () => {
+        console.log('[WS] Connected');
+    };
+
+    ws.onmessage = (event) => {
+        if (event.data === 'pong') {
+            // console.log('[WS] Pong received');
+            return;
+        }
+        try {
+            const data = JSON.parse(event.data);
+            onMessage(data);
+        } catch (e) {
+            console.error('[WS] Failed to parse message:', e);
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error('[WS] Error:', error);
+        onError?.(error);
+    };
+
+    ws.onclose = (event) => {
+        console.log('[WS] Closed:', event.code, event.reason);
+        onClose?.(event);
+    };
+
+    return ws;
+}
+
+export function sendWebSocketPing(ws) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('ping');
+    }
+}
+
