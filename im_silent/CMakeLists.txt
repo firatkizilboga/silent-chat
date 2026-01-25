@@ -10,13 +10,13 @@ find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(nlohmann_json 3.2.0 REQUIRED)
 
-# Build imtui with ncurses support
-set(IMTUI_SUPPORT_NCURSES ON CACHE BOOL "Enable ncurses support" FORCE)
-set(IMTUI_SUPPORT_CURL OFF CACHE BOOL "Disable curl support" FORCE)
-set(IMTUI_BUILD_EXAMPLES OFF CACHE BOOL "Disable imtui examples" FORCE)
+# Build FTXUI library
+set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "Disable FTXUI examples" FORCE)
+set(FTXUI_BUILD_DOCS OFF CACHE BOOL "Disable FTXUI docs" FORCE)
+set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "Disable FTXUI install" FORCE)
 
-# Add imtui library
-add_subdirectory(external/imtui)
+# Add FTXUI library
+add_subdirectory(external/ftxui)
 
 # im_silent executable
 add_executable(im_silent
@@ -29,12 +29,13 @@ add_executable(im_silent
 )
 
 target_include_directories(im_silent PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/imtui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(im_silent PRIVATE
-    imtui-ncurses
+    ftxui::screen
+    ftxui::dom
+    ftxui::component
     OpenSSL::SSL
     OpenSSL::Crypto
     CURL::libcurl
