@@ -278,13 +278,13 @@ std::string Crypto::rsaDecrypt(const std::string& encryptedB64) const {
 
 std::vector<uint8_t> Crypto::generateAESKey() {
     std::vector<uint8_t> key(32); // 256 bits
-    RAND_bytes(key.data(), key.size());
+    RAND_bytes(key.data(), static_cast<int>(key.size()));
     return key;
 }
 
 std::string Crypto::aesEncrypt(const std::string& plaintext, const std::vector<uint8_t>& key) {
     std::vector<uint8_t> iv(12);
-    RAND_bytes(iv.data(), iv.size());
+    RAND_bytes(iv.data(), static_cast<int>(iv.size()));
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (!ctx) return "";
@@ -310,7 +310,7 @@ std::string Crypto::aesEncrypt(const std::string& plaintext, const std::vector<u
 
     if (EVP_EncryptUpdate(ctx, ciphertext.data(), &len,
                           reinterpret_cast<const uint8_t*>(plaintext.c_str()),
-                          plaintext.size()) != 1) {
+                          static_cast<int>(plaintext.size())) != 1) {
         EVP_CIPHER_CTX_free(ctx);
         return "";
     }
@@ -368,7 +368,7 @@ std::optional<std::string> Crypto::aesDecrypt(const std::string& ciphertextB64, 
         return std::nullopt;
     }
 
-    if (EVP_DecryptUpdate(ctx, plaintext.data(), &len, ciphertext.data(), ciphertext.size()) != 1) {
+    if (EVP_DecryptUpdate(ctx, plaintext.data(), &len, ciphertext.data(), static_cast<int>(ciphertext.size())) != 1) {
         EVP_CIPHER_CTX_free(ctx);
         return std::nullopt;
     }
@@ -396,7 +396,7 @@ std::string Crypto::base64Encode(const std::vector<uint8_t>& data) {
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
     BIO_push(b64, mem);
     
-    BIO_write(b64, data.data(), data.size());
+    BIO_write(b64, data.data(), static_cast<int>(data.size()));
     BIO_flush(b64);
     
     char* outData;
@@ -413,12 +413,12 @@ std::string Crypto::base64Encode(const std::string& data) {
 
 std::vector<uint8_t> Crypto::base64Decode(const std::string& encoded) {
     BIO* b64 = BIO_new(BIO_f_base64());
-    BIO* mem = BIO_new_mem_buf(encoded.c_str(), encoded.size());
+    BIO* mem = BIO_new_mem_buf(encoded.c_str(), static_cast<int>(encoded.size()));
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
     BIO_push(b64, mem);
     
     std::vector<uint8_t> result(encoded.size());
-    int len = BIO_read(b64, result.data(), result.size());
+    int len = BIO_read(b64, result.data(), static_cast<int>(result.size()));
     
     BIO_free_all(b64);
     
