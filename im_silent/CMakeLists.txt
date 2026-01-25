@@ -44,3 +44,25 @@ target_link_libraries(im_silent PRIVATE
     nlohmann_json::nlohmann_json
     pthread
 )
+
+# Compiler warning flags
+target_compile_options(im_silent PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wshadow
+    -Wconversion
+)
+
+# Add sanitizers for debug builds
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    target_compile_options(im_silent PRIVATE
+        -fsanitize=address
+        -fsanitize=undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(im_silent PRIVATE
+        -fsanitize=address
+        -fsanitize=undefined
+    )
+endif()

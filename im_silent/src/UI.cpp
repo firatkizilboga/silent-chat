@@ -188,10 +188,10 @@ Component UI::createLoginScreen() {
             // Regular navigation
             if (event == Event::Character('k') || event == Event::Character('K')) {
                 if (selectedUserIndex_ > 0) selectedUserIndex_--;
-                else selectedUserIndex_ = userDisplayList_.size() - 1;
+                else selectedUserIndex_ = static_cast<int>(userDisplayList_.size()) - 1;
                 return true;
             } else if (event == Event::Character('j') || event == Event::Character('J')) {
-                selectedUserIndex_ = (selectedUserIndex_ + 1) % userDisplayList_.size();
+                selectedUserIndex_ = (selectedUserIndex_ + 1) % static_cast<int>(userDisplayList_.size());
                 return true;
             } else if (event == Event::Character('x') || event == Event::Character('X') || 
                        event == Event::Delete) {
@@ -414,8 +414,8 @@ void UI::refreshUserList() {
     userDisplayList_.push_back("+ Add New User");
     
     // Ensure selected index is valid
-    if (selectedUserIndex_ >= (int)userDisplayList_.size()) {
-        selectedUserIndex_ = userDisplayList_.size() - 1;
+    if (selectedUserIndex_ >= static_cast<int>(userDisplayList_.size())) {
+        selectedUserIndex_ = static_cast<int>(userDisplayList_.size()) - 1;
     }
 }
 
