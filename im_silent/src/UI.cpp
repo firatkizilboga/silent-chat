@@ -24,7 +24,7 @@ void UI::run() {
         },
         &screenIndex_
     );
-
+    
     screen.Loop(mainComponent);
 }
 
@@ -199,34 +199,40 @@ Component UI::createLoginScreen() {
 }
 
 Component UI::createChatScreen() {
-    // Sidebar: New chat button
-    auto newChatButton = Button("+ New Chat", [this] {
-        if (!newChatInputText_.empty()) {
-            currentPeer_ = newChatInputText_;
-            newChatInputText_ = "";
-            refreshMessages();
-        }
+    // Sidebar: New chat button - just focuses the input field
+    auto newChatButton = Button("+ New Chat", [] {
+        // Button click will naturally focus cycling, Enter key handles connection
     });
     
     // New chat input
     auto newChatInput = Input(&newChatInputText_, "Enter username...");
     
-    // Sidebar: Peer list menu
+    // Message input
+    auto messageInput = Input(&messageInputText_, "Type a message...");
+    
+    // Sidebar: Peer list menu with proper selection handling
     MenuOption peerMenuOption;
-    peerMenuOption.on_enter = [this] {
+    peerMenuOption.on_enter = [this, messageInput] {
         std::lock_guard<std::mutex> lock(peersMutex_);
         if (selectedPeerIndex_ >= 0 && selectedPeerIndex_ < (int)peers_.size()) {
             currentPeer_ = peers_[selectedPeerIndex_];
             refreshMessages();
+            messageInput->TakeFocus();
+        }
+    };
+    // Also handle selection on change (for click events)
+    peerMenuOption.on_change = [this, messageInput] {
+        std::lock_guard<std::mutex> lock(peersMutex_);
+        if (selectedPeerIndex_ >= 0 && selectedPeerIndex_ < (int)peers_.size()) {
+            currentPeer_ = peers_[selectedPeerIndex_];
+            refreshMessages();
+            messageInput->TakeFocus();
         }
     };
     auto peerMenu = Menu(&peers_, &selectedPeerIndex_, peerMenuOption);
     
-    // Sidebar container
-    auto sidebarContainer = Container::Vertical({newChatInput, newChatButton, peerMenu});
-    
-    // Message input
-    auto messageInput = Input(&messageInputText_, "Type a message...");
+    // Sidebar container with all components
+    auto sidebarContainer = Container::Vertical({peerMenu, newChatInput, newChatButton});
     
     // Main area container
     auto mainAreaContainer = Container::Vertical({messageInput});
@@ -237,52 +243,87 @@ Component UI::createChatScreen() {
         mainAreaContainer
     });
     
-    return Renderer(chatContainer, [this, sidebarContainer, messageInput, peerMenu, newChatButton] {
+    // Add Ctrl+C handling to exit cleanly
+    auto chatWithExit = chatContainer | CatchEvent([this](Event event) {
+        if (event == Event::CtrlC) {
+            backend_.stopPolling();
+            return true; // Will cause screen.Loop to exit
+        }
+        return false;
+    });
+    
+    return Renderer(chatWithExit, [this, sidebarContainer, messageInput, peerMenu, newChatButton, newChatInput] {
         // Render sidebar
         Elements sidebarElements;
+        
+        // Add im_silent header with same height as username section
+        sidebarElements.push_back(
+            vbox({
+                text(""),
+                text("im_silent") | color(Color::Cyan) | bold | center,
+                text("")
+            }) | size(HEIGHT, EQUAL, 3)
+        );
+        sidebarElements.push_back(separator());
+        
+        // CHATS section
         sidebarElements.push_back(text("  CHATS") | color(Color::GreenLight) | bold);
         sidebarElements.push_back(separator());
         
-        // New chat input and button
-        sidebarElements.push_back(vbox({
-            newChatButton->Render(),
-            separator()
-        }));
-        
+        // Peer list first
         {
             std::lock_guard<std::mutex> lock(peersMutex_);
             if (peers_.empty()) {
                 sidebarElements.push_back(
-                    text("No conversations yet") | color(Color::GrayDark)
+                    text("No conversations yet") | color(Color::GrayDark) | flex
                 );
             } else {
-                sidebarElements.push_back(peerMenu->Render());
+                sidebarElements.push_back(peerMenu->Render() | flex);
             }
         }
+        
+        // New chat input and button at the bottom - with fixed width to prevent shrinking
+        sidebarElements.push_back(separator());
+        sidebarElements.push_back(newChatInput->Render() | size(WIDTH, EQUAL, 28));
+        sidebarElements.push_back(newChatButton->Render() | hcenter);
         
         auto sidebar = vbox(sidebarElements) | size(WIDTH, EQUAL, 30);
         
         // Render main area
         Elements mainElements;
         
-        // Header
+        // Header - Make it bigger and more prominent
         if (currentPeer_.empty()) {
             mainElements.push_back(
-                text("Select a chat") | color(Color::GrayDark)
+                vbox({
+                    text(""),
+                    text("Select a chat") | color(Color::GrayDark) | center,
+                    text("")
+                })
             );
         } else {
+            // Make username bigger with larger font simulation
             mainElements.push_back(
-                text("@" + currentPeer_) | color(Color::Yellow) | bold
+                vbox({
+                    text(""),
+                    hbox({
+                        text(" "),
+                        text("@" + currentPeer_) | color(Color::Yellow) | bold,
+                        text(" ")
+                    }) | center,
+                    text("")
+                }) | size(HEIGHT, EQUAL, 3)
             );
         }
         mainElements.push_back(separator());
         
-        // Messages
+        // Messages - Constrain width so they don't fill the whole row
         if (currentPeer_.empty()) {
             mainElements.push_back(
                 text("Select a chat to start messaging") | 
                 color(Color::GrayLight) | 
-                center
+                center |
+                flex
             );
         } else {
             Elements messageElements;
@@ -292,26 +333,36 @@ Component UI::createChatScreen() {
                 
                 Element bubble;
                 if (isMe) {
-                    // Right-aligned message with rounded border
-                    bubble = vbox({
-                        text(msg.content) | border | color(Color::White),
-                        text("Me") | color(Color::CyanLight)
-                    }) | align_right;
-                } else {
-                    // Left-aligned message with rounded border
-                    bubble = vbox({
-                        text(msg.content) | border | color(Color::White),
-                        text(msg.sender) | color(Color::GreenLight)
+                    // Right-aligned message with rounded border and padding
+                    bubble = hbox({
+                        filler(),
+                        vbox({
+                            hbox({text(" "), text(msg.content) | border | color(Color::White), text(" ")}),
+                            hbox({filler(), text("Me") | color(Color::CyanLight)})
+                        }) | size(WIDTH, LESS_THAN, 60)
                     });
+                } else {
+                    // Left-aligned message with rounded border and padding
+                    bubble = vbox({
+                        hbox({text(" "), text(msg.content) | border | color(Color::White), text(" ")}),
+                        text(msg.sender) | color(Color::GreenLight)
+                    }) | size(WIDTH, LESS_THAN, 60);
                 }
                 messageElements.push_back(bubble);
                 messageElements.push_back(text(""));
             }
-            mainElements.push_back(vbox(messageElements) | vscroll_indicator | frame);
+            mainElements.push_back(vbox(messageElements) | vscroll_indicator | frame | flex);
         }
         
         mainElements.push_back(separator());
-        mainElements.push_back(messageInput->Render());
+        // Add padding to Type a message input and remove background
+        mainElements.push_back(
+            hbox({
+                text(" "),
+                messageInput->Render() | flex,
+                text(" ")
+            })
+        );
         
         auto mainArea = vbox(mainElements);
         
