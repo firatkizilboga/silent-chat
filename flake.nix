@@ -1,5 +1,5 @@
 {
-  description = "Silent Chat - TUI chat client using imtui";
+  description = "Silent Chat - TUI chat client using FTXUI";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -54,7 +54,6 @@
           ];
 
           buildInputs = with pkgs; [
-            ncurses
             openssl
             curl
             sqlite
