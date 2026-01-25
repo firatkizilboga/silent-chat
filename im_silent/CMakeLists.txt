@@ -21,6 +21,7 @@ add_subdirectory(external/ftxui)
 # im_silent executable
 add_executable(im_silent
     src/main.cpp
+    src/UI.cpp
     src/crypto.cpp
     src/http.cpp
     src/database.cpp
