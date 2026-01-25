@@ -13,6 +13,7 @@
 #include <functional>
 #include <atomic>
 #include <thread>
+#include <condition_variable>
 
 namespace silentchat {
 
@@ -57,6 +58,8 @@ private:
     std::atomic<bool> polling_{false};
     std::thread pollThread_;
     UpdateCallback updateCallback_;
+    std::mutex pollMutex_;
+    std::condition_variable pollCV_;
 };
 
 } // namespace silentchat

@@ -328,13 +328,19 @@ void Backend::startPolling(UpdateCallback callback) {
                 // Ignore polling errors
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            // Use condition variable with timeout instead of sleep
+            // This allows immediate wakeup when stopPolling() is called
+            std::unique_lock<std::mutex> lock(pollMutex_);
+            pollCV_.wait_for(lock, std::chrono::seconds(1), [this]() {
+                return !polling_.load();
+            });
         }
     });
 }
 
 void Backend::stopPolling() {
     polling_ = false;
+    pollCV_.notify_all(); // Wake up the polling thread immediately
     if (pollThread_.joinable()) {
         pollThread_.join();
     }
