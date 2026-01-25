@@ -34,7 +34,7 @@ Component UI::createLoginScreen() {
     
     // Menu for user list
     MenuOption menuOption;
-    menuOption.on_enter = [this] {
+    menuOption.on_enter = [this, aliasInput] {
         if (selectedUserIndex_ < (int)userDisplayList_.size() - 1) {
             // Login with selected user
             auto users = backend_.getAppDB()->getUsers();
@@ -42,9 +42,10 @@ Component UI::createLoginScreen() {
                 performLogin(users[selectedUserIndex_].alias);
             }
         } else {
-            // "Add New User" selected
+            // "Add New User" selected - focus the input
             showAddUser_ = true;
             aliasInputText_ = "";
+            aliasInput->TakeFocus();
         }
     };
     
@@ -130,17 +131,24 @@ Component UI::createLoginScreen() {
             elements.push_back(addUserContainer->Render());
         } else {
             elements.push_back(userMenu->Render() | border | size(HEIGHT, LESS_THAN, 15));
-            elements.push_back(separator());
-            elements.push_back(
-                text("NAV: ↑/↓/j/k  SELECT: Enter  DELETE: Del/x") | 
-                color(Color::GrayDark)
-            );
         }
         
         if (loginError_) {
             elements.push_back(
                 text("Connection failed for " + lastAttemptedAlias_) | 
                 color(Color::RedLight)
+            );
+        }
+        
+        // Add flexible space to push legend to bottom
+        elements.push_back(filler());
+        
+        // Legend at the bottom
+        if (!showDeleteConfirm_ && !showAddUser_) {
+            elements.push_back(separator());
+            elements.push_back(
+                text("NAV: ↑/↓/j/k  SELECT: Enter  DELETE: Del/x") | 
+                color(Color::GrayDark)
             );
         }
         
