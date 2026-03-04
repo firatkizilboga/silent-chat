@@ -1,5 +1,5 @@
 /**
- * im_silent - Silent Chat TUI Client
+ * tui - Silent Chat TUI Client
  * A terminal-based E2EE chat client using FTXUI
  */
 
@@ -11,10 +11,10 @@
 
 int main() {
     // Debug to stderr first
-    std::cerr << "[DEBUG] im_silent starting..." << std::endl;
+    std::cerr << "[DEBUG] tui starting..." << std::endl;
     
     // Initialize logger
-    std::string logPath = silentchat::getConfigDir().string() + "/im_silent.log";
+    std::string logPath = silentchat::getConfigDir().string() + "/tui.log";
     std::cerr << "[DEBUG] Log path: " << logPath << std::endl;
     
     try {
@@ -24,7 +24,7 @@ int main() {
         std::cerr << "[ERROR] Logger init failed: " << e.what() << std::endl;
     }
     
-    LOG_INFO("Main", "im_silent starting...");
+    LOG_INFO("Main", "tui starting...");
     LOG_INFO("Main", "Log file: " + logPath);
     LOG_INFO("Main", "Server: " + std::string(silentchat::SERVER_URL));
     
@@ -33,6 +33,6 @@ int main() {
     silentchat::UI ui;
     ui.run();
     
-    LOG_INFO("Main", "im_silent shutting down");
+    LOG_INFO("Main", "tui shutting down");
     return 0;
 }

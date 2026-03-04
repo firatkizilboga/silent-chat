@@ -1,4 +1,3 @@
-import pytest
 from tests.test_auth import generate_rsa_keys, sign_message, serialize_public_key, unique_alias
 import base64
 

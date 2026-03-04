@@ -264,11 +264,11 @@ Component UI::createChatScreen() {
         // Render sidebar
         Elements sidebarElements;
         
-        // Add im_silent header with same height as username section
+        // Add silent-chat header with same height as username section
         sidebarElements.push_back(
             vbox({
                 text(""),
-                text("im_silent") | color(Color::Cyan) | bold | center,
+                text("silent-chat") | color(Color::Cyan) | bold | center,
                 text("")
             }) | size(HEIGHT, EQUAL, 3)
         );

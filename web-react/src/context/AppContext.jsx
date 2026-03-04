@@ -264,7 +264,15 @@ export function AppProvider({ children }) {
                 } catch (e) {
                     if (e.message === "AUTH_EXPIRED") {
                         console.log('[Conn] Session expired, re-authenticating...');
-                        await login(stateRef.current.alias);
+                        stopPolling(); // Stop polling to prevent loop storm
+                        try {
+                            await login(stateRef.current.alias);
+                        } catch (loginErr) {
+                            console.error('[Conn] Auto-login failed:', loginErr);
+                            // If auto-login fails (e.g. user deleted on server), logout to allow re-registration
+                            await logout();
+                            dispatch({ type: 'LOGIN_ERROR', error: 'Session expired. Please sign in again.' });
+                        }
                     } else if (e.name !== 'AbortError' && isMounted) {
                         console.error('Poll error:', e);
                     }

@@ -2,8 +2,6 @@ from fastapi.testclient import TestClient
 import pytest
 from tests.test_auth import generate_rsa_keys, sign_message, serialize_public_key, unique_alias
 import base64
-import json
-import time
 
 # --- Reused Fixtures/Helpers ---
 
@@ -59,7 +57,7 @@ def test_websocket_connection_unauthorized(client: TestClient):
     # TestClient.websocket_connect raises exception on close or uses context manager
     # We expect a 403 or immediate close code 1008
     with pytest.raises(Exception): # Starlette test client might raise an error for 1008
-        with client.websocket_connect("/ws?token=INVALID_TOKEN") as websocket:
+        with client.websocket_connect("/ws?token=INVALID_TOKEN"):
             pass
 
 def test_websocket_connection_success(client: TestClient, registered_alice):

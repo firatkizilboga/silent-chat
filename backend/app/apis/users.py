@@ -4,7 +4,8 @@ from app.db import db
 
 router = APIRouter()
 
-@router.get("/users")
+
+@router.get("/users")  # TODO: Deprecate, why do we even need this?
 async def get_all_users(current_user: str = Depends(get_current_user)):
     """
     Retrieves a list of all registered user aliases.
@@ -12,4 +13,4 @@ async def get_all_users(current_user: str = Depends(get_current_user)):
     """
     users = await db.get_all_users()
     # Return aliases, excluding the current user's alias
-    return [user['alias'] for user in users if user['alias'] != current_user]
+    return [user["alias"] for user in users if user["alias"] != current_user]

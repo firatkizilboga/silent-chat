@@ -1,5 +1,5 @@
-# im_silent client CMake configuration
 cmake_minimum_required(VERSION 3.20)
+project(silent-chat VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,8 +18,8 @@ set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "Disable FTXUI install" FORCE)
 # Add FTXUI library
 add_subdirectory(external/ftxui)
 
-# im_silent executable
-add_executable(im_silent
+# tui executable
+add_executable(tui
     src/main.cpp
     src/UI.cpp
     src/crypto.cpp
@@ -29,11 +29,11 @@ add_executable(im_silent
     src/app_db.cpp
 )
 
-target_include_directories(im_silent PRIVATE
+target_include_directories(tui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(im_silent PRIVATE
+target_link_libraries(tui PRIVATE
     ftxui::screen
     ftxui::dom
     ftxui::component
@@ -46,7 +46,7 @@ target_link_libraries(im_silent PRIVATE
 )
 
 # Compiler warning flags
-target_compile_options(im_silent PRIVATE
+target_compile_options(tui PRIVATE
     -Wall
     -Wextra
     -Wpedantic
@@ -56,12 +56,12 @@ target_compile_options(im_silent PRIVATE
 
 # Add sanitizers for debug builds
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-    target_compile_options(im_silent PRIVATE
+    target_compile_options(tui PRIVATE
         -fsanitize=address
         -fsanitize=undefined
         -fno-omit-frame-pointer
     )
-    target_link_options(im_silent PRIVATE
+    target_link_options(tui PRIVATE
         -fsanitize=address
         -fsanitize=undefined
     )
