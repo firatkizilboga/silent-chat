@@ -515,6 +515,9 @@ export async function pollMessages(state, dispatch, signal) {
             console.log('[Poll] Request aborted');
             return [];
         }
+        if (e.message === 'AUTH_EXPIRED') {
+            throw e;
+        }
         console.error("Poll error:", e);
         return [];
     }
