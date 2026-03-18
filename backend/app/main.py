@@ -4,12 +4,13 @@ from contextlib import asynccontextmanager
 from app.db import db
 from app.apis import auth as auth_router
 from app.apis import messaging as messaging_router
-from app.apis import users as users_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
     yield
+
 
 app = FastAPI(title="Silent Chat API", lifespan=lifespan)
 
@@ -23,7 +24,7 @@ app.add_middleware(
 
 app.include_router(auth_router.router, prefix="/auth", tags=["Authentication"])
 app.include_router(messaging_router.router)
-app.include_router(users_router.router) # Include the new users router
+
 
 @app.get("/", tags=["Health Check"])
 def read_root():
