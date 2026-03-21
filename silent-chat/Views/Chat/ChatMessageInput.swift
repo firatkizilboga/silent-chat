@@ -14,7 +14,7 @@ struct ChatMessageInput: View {
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
             .frame(width: 44, height: 44)
-            .glassEffect(in: .circle)
+            .circleGlassEffect()
 
             HStack(spacing: 6) {
                 TextField("Message", text: $messageText)
@@ -38,7 +38,7 @@ struct ChatMessageInput: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 44)
-            .glassEffect(in: .capsule)
+            .capsuleGlassEffect()
         }
     }
 }

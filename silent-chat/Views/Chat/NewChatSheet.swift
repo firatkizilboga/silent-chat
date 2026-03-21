@@ -43,7 +43,7 @@ struct NewChatSheet: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 44)
-                .glassEffect(.clear, in: .capsule)
+                .capsuleGlassEffect()
 
                 Text("Enter the alias of the person you want to chat with.")
                     .font(.footnote)
@@ -69,7 +69,7 @@ struct NewChatSheet: View {
                         .font(.subheadline.bold())
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .glassEffect(in: .capsule)
+                        .capsuleGlassEffect()
                 }
                 .buttonStyle(.plain)
             }

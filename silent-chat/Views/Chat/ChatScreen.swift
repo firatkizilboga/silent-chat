@@ -19,7 +19,7 @@ struct ChatScreen: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 8)
-                        .glassEffect(in: .capsule)
+                        .capsuleGlassEffect()
                     }
                 } else {
                     List(messageViewModel.peers, id: \.self) { alias in

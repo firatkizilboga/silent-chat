@@ -23,7 +23,7 @@ struct ToastView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .glassEffect(in: .capsule)
+            .capsuleGlassEffect()
             .shadow(radius: 8, y: 4)
             .padding(.horizontal, 16)
             .contentShape(Rectangle())

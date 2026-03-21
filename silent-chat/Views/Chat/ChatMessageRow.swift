@@ -22,7 +22,7 @@ struct ChatMessageRow: View {
                     }
                 }
                 .padding(10)
-                .glassEffect(in: .rect(cornerRadius: 12))
+                .capsuleGlassEffect()
                 .contextMenu {
                     if message.type != "FILE" {
                         Button("Copy", systemImage: "doc.on.doc") {
