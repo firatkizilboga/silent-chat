@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct silent_chatApp: App {
@@ -13,5 +14,6 @@ struct silent_chatApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [SentMessage.self, StoredMessage.self])
     }
 }
