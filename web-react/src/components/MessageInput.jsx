@@ -3,7 +3,7 @@
  * Clean minimal buttons
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { sendMessage, sendFile } from '../lib/api';
 
@@ -11,22 +11,37 @@ export default function MessageInput({ currentPeer, disabled }) {
     const { state, dispatch } = useApp();
     const [text, setText] = useState('');
     const [sending, setSending] = useState(false);
+    const inputRef = useRef(null);
     const fileInputRef = useRef(null);
     const cameraInputRef = useRef(null);
 
+    // Auto-focus input when peer changes or becomes enabled
+    useEffect(() => {
+        if (!disabled && currentPeer) {
+            inputRef.current?.focus();
+        }
+    }, [disabled, currentPeer]);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!text.trim() || !currentPeer || sending) return;
+        const messageText = text.trim();
+        if (!messageText || !currentPeer || sending) return;
 
+        // Clear input immediately and keep focus
+        setText('');
         setSending(true);
+        
         try {
-            await sendMessage(currentPeer, text.trim(), state, dispatch);
-            setText('');
+            await sendMessage(currentPeer, messageText, state, dispatch);
         } catch (e) {
             console.error("Send failed:", e);
             alert("Failed to send message: " + e.message);
+            // Restore text on failure
+            setText(messageText);
         } finally {
             setSending(false);
+            // Ensure focus is restored
+            inputRef.current?.focus();
         }
     };
 
@@ -43,6 +58,7 @@ export default function MessageInput({ currentPeer, disabled }) {
             alert("Failed to send attachment: " + e.message);
         } finally {
             setSending(false);
+            inputRef.current?.focus();
         }
     };
 
@@ -97,10 +113,12 @@ export default function MessageInput({ currentPeer, disabled }) {
             <input
                 type="text"
                 id="messageInput"
+                ref={inputRef}
                 placeholder={disabled ? "Select a chat" : "Message..."}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                disabled={disabled || sending}
+                disabled={disabled}
+                autoComplete="off"
             />
 
             <button
