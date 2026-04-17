@@ -101,25 +101,42 @@ export default function MessageList({ messages, currentPeer }) {
         return (a.timestamp || 0) - (b.timestamp || 0);
     });
 
+    const getDayLabel = (timestamp) => {
+        const date = new Date(timestamp);
+        const today = new Date();
+        const yesterday = new Date();
+        yesterday.setDate(today.getDate() - 1);
+        if (date.toDateString() === today.toDateString()) return 'Today';
+        if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+        return date.toLocaleDateString([], { month: 'long', day: 'numeric', year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
+    };
+
     return (
         <div className="messages-container" id="messagesContainer" ref={containerRef}>
             {sortedMessages.map((msg, index) => {
                 const isSent = msg.sender === 'Me';
+                const prevMsg = sortedMessages[index - 1];
+                const showDayLabel = msg.timestamp && (!prevMsg || !prevMsg.timestamp ||
+                    new Date(msg.timestamp).toDateString() !== new Date(prevMsg.timestamp).toDateString());
                 return (
-                    <div key={index} className={`message ${isSent ? 'sent' : 'received'}`}>
-                        <div className="message-bubble">
-                            {msg.attachment && (
-                                <Attachment
-                                    attachment={msg.attachment}
-                                    onImageLoad={handleImageLoad}
-                                />
-                            )}
-                            {msg.text && (
-                                <div dangerouslySetInnerHTML={{ __html: escapeHtml(msg.text) }} />
-                            )}
-                        </div>
-                        <div className="message-meta">
-                            <span>{isSent ? 'You' : msg.sender}</span>
+                    <div key={index} className={`message-row ${isSent ? 'sent' : 'received'}`}>
+                        {showDayLabel && (
+                            <div className="day-label">{getDayLabel(msg.timestamp)}</div>
+                        )}
+                        <div className={`message ${isSent ? 'sent' : 'received'}`}>
+                            <div className="message-bubble">
+                                {msg.attachment && (
+                                    <Attachment attachment={msg.attachment} onImageLoad={handleImageLoad} />
+                                )}
+                                {msg.text && (
+                                    <div dangerouslySetInnerHTML={{ __html: escapeHtml(msg.text) }} />
+                                )}
+                                {msg.timestamp && (
+                                    <span className="message-time">
+                                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
                 );

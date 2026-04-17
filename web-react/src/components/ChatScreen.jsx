@@ -10,7 +10,7 @@ import MessageInput from './MessageInput';
 
 export default function ChatScreen() {
     const { state, dispatch, logout } = useApp();
-    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [sidebarOpen, setSidebarOpen] = useState(true);
 
     const selectPeer = (peer) => {
         dispatch({ type: 'SELECT_PEER', peer });
@@ -27,11 +27,6 @@ export default function ChatScreen() {
 
     return (
         <div className="chat-screen">
-            {/* Sidebar overlay for mobile */}
-            <div
-                className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
-                onClick={() => setSidebarOpen(false)}
-            />
 
             <Sidebar
                 isOpen={sidebarOpen}

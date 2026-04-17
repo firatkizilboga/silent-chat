@@ -2,33 +2,33 @@
    CSS Variables & Design System
 ======================================== */
 :root {
-    /* Colors - Dark Theme */
-    --bg-primary: #0f0f14;
-    --bg-secondary: #16161e;
-    --bg-tertiary: #1a1b26;
-    --bg-card: #1f2335;
-    --bg-elevated: #24283b;
+    /* Colors - i3 Theme */
+    --bg-primary: #000000;
+    --bg-secondary: #000000;
+    --bg-tertiary: #0c0c0c;
+    --bg-card: #0c0c0c;
+    --bg-elevated: #1a1a1a;
 
     /* Accent Colors */
-    --accent-primary: #7aa2f7;
-    --accent-secondary: #bb9af7;
-    --accent-success: #9ece6a;
-    --accent-warning: #e0af68;
-    --accent-error: #f7768e;
+    --accent-primary: #ffffff;
+    --accent-secondary: #888888;
+    --accent-success: #ffffff;
+    --accent-warning: #888888;
+    --accent-error: #900000;
 
     /* Text Colors */
-    --text-primary: #c0caf5;
-    --text-secondary: #a9b1d6;
-    --text-muted: #565f89;
-    --text-inverse: #1a1b26;
+    --text-primary: #ffffff;
+    --text-secondary: #888888;
+    --text-muted: #484e50;
+    --text-inverse: #000000;
 
     /* Borders */
-    --border-color: #292e42;
+    --border-color: #333333;
     --border-subtle: rgba(255, 255, 255, 0.05);
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, #7aa2f7 0%, #bb9af7 100%);
-    --gradient-glow: linear-gradient(135deg, rgba(122, 162, 247, 0.2) 0%, rgba(187, 154, 247, 0.2) 100%);
+    --gradient-primary: linear-gradient(135deg, #ffffff 0%, #888888 100%);
+    --gradient-glow: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(136, 136, 136, 0.1) 100%);
 
     /* Shadows */
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -109,7 +109,7 @@ button {
 }
 
 .glass {
-    background: rgba(31, 35, 53, 0.8);
+    background: rgba(12, 12, 12, 0.8);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--border-subtle);
@@ -152,8 +152,8 @@ button {
     width: 100%;
     background: var(--bg-primary);
     background-image:
-        radial-gradient(ellipse at 20% 80%, rgba(122, 162, 247, 0.08) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 20%, rgba(187, 154, 247, 0.08) 0%, transparent 50%);
+        radial-gradient(ellipse at 20% 80%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(255, 255, 255, 0.03) 0%, transparent 50%);
     align-items: center;
     justify-content: center;
 }
@@ -283,14 +283,36 @@ button {
     border-bottom: 1px solid var(--border-color);
 }
 
+.new-chat-section {
+    display: flex;
+    gap: var(--space-sm);
+}
+
 .new-chat-section input {
-    width: 100%;
+    flex: 1;
     padding: var(--space-md);
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     color: var(--text-primary);
     transition: var(--transition-fast);
+}
+
+.new-chat-btn {
+    padding: var(--space-sm) var(--space-md);
+    background: var(--accent-primary);
+    color: var(--text-inverse);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: var(--transition-fast);
+}
+
+.new-chat-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
 }
 
 .new-chat-section input:focus {
@@ -479,7 +501,7 @@ button {
 .input-group input:focus {
     outline: none;
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.15);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
 }
 
 .input-group input::placeholder {
@@ -854,7 +876,7 @@ button {
 .messages-container {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-lg) var(--space-xl) var(--space-xl);
+    padding: var(--space-lg) var(--space-md);
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
@@ -875,7 +897,56 @@ button {
     opacity: 0.5;
 }
 
+/* Day Label */
+.day-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    margin: var(--space-md) 0 var(--space-sm);
+    width: 100%;
+    align-self: stretch;
+}
+
+.day-label::before,
+.day-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* Message time */
+.message-time {
+    display: block;
+    font-size: 0.65rem;
+    text-align: right;
+    margin-top: 2px;
+}
+
+.message.sent .message-time {
+    color: rgba(0, 0, 0, 0.4);
+}
+
+.message.received .message-time {
+    color: rgba(255, 255, 255, 0.35);
+}
+
 /* Message Bubbles */
+.message-row {
+    display: flex;
+    flex-direction: column;
+}
+
+.message-row.sent {
+    align-items: flex-end;
+}
+
+.message-row.received {
+    align-items: flex-start;
+}
+
 .message {
     display: flex;
     flex-direction: column;
@@ -897,6 +968,7 @@ button {
 
 .message.sent {
     align-self: flex-end;
+    margin-left: auto;
 }
 
 .message.received {
@@ -908,6 +980,8 @@ button {
     border-radius: var(--radius-lg);
     word-wrap: break-word;
     line-height: 1.4;
+    width: fit-content;
+    max-width: 100%;
 }
 
 .message.sent .message-bubble {
@@ -1101,7 +1175,7 @@ button {
 }
 
 .message-attachment .file-download:hover .file-info {
-    background: rgba(122, 162, 247, 0.2);
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .message-attachment .download-icon {
@@ -1198,11 +1272,11 @@ button {
         top: 0;
         left: 0;
         z-index: 100;
-        width: 85%;
-        max-width: 320px;
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
         transform: translateX(-100%);
         transition: transform var(--transition-normal);
-        box-shadow: var(--shadow-lg);
     }
 
     .sidebar.open {

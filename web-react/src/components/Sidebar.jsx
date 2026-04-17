@@ -33,7 +33,7 @@ export default function Sidebar({
     return (
         <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
             <div className="sidebar-header">
-                <h2>Chats</h2>
+                <h2>Silent Chat</h2>
                 <button className="close-sidebar-btn" onClick={() => onSelectPeer(currentPeer)}>
                     ×
                 </button>
@@ -48,6 +48,15 @@ export default function Sidebar({
                     onChange={(e) => setNewChatInput(e.target.value)}
                     onKeyDown={handleNewChat}
                 />
+                <button
+                    className="new-chat-btn"
+                    onClick={() => { if (newChatInput.trim()) { onCreateChat(newChatInput.trim()); setNewChatInput(''); } }}
+                    disabled={!newChatInput.trim()}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="23" y1="23" x2="16.65" y2="16.65"/>
+                    </svg>
+                </button>
             </div>
 
             <div className="chat-list" id="chatList">
