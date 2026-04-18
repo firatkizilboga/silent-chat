@@ -115,6 +115,69 @@ final class CryptoService {
         return "-----BEGIN PUBLIC KEY-----\n\(base64)\n-----END PUBLIC KEY-----"
     }
 
+    // MARK: - Private Key Export (PKCS#8)
+
+    /// Exports the signing private key from the Keychain as a PKCS#8 PEM string.
+    func exportSigningPrivateKeyPEM() throws -> String {
+        guard let privateKey = try loadSigningPrivateKey() else {
+            throw CryptoServiceError.keyExportFailed
+        }
+        var error: Unmanaged<CFError>?
+        guard let pkcs1 = SecKeyCopyExternalRepresentation(privateKey, &error) as Data? else {
+            throw error?.takeRetainedValue() ?? CryptoServiceError.keyExportFailed
+        }
+        let pkcs8 = try wrapRSAPrivateKeyPKCS8(pkcs1Der: pkcs1)
+        let base64 = pkcs8.base64EncodedString(options: [.lineLength64Characters])
+        return "-----BEGIN PRIVATE KEY-----\n\(base64)\n-----END PRIVATE KEY-----"
+    }
+
+    /// Exports the signing public key from the Keychain as an SPKI PEM string.
+    func exportSigningPublicKeyPEM() throws -> String {
+        guard let privateKey = try loadSigningPrivateKey(),
+              let publicKey = SecKeyCopyPublicKey(privateKey) else {
+            throw CryptoServiceError.keyExportFailed
+        }
+        return try exportPublicKeyPEM(publicKey)
+    }
+
+    /// Imports a PKCS#8 PEM private key and stores it in the Keychain under the signing tag.
+    /// Replaces any existing signing key.
+    func importSigningPrivateKeyFromPEM(_ pem: String) throws -> SecKey {
+        let pkcs8Der = try extractPEMBody(pem, header: "-----BEGIN PRIVATE KEY-----", footer: "-----END PRIVATE KEY-----")
+        let pkcs1Der = try unwrapPKCS8ToPKCS1(pkcs8Der: pkcs8Der)
+
+        let attributes: [String: Any] = [
+            kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
+            kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
+            kSecAttrKeySizeInBits as String: 2048
+        ]
+
+        var error: Unmanaged<CFError>?
+        guard let privateKey = SecKeyCreateWithData(pkcs1Der as CFData, attributes as CFDictionary, &error) else {
+            throw error?.takeRetainedValue() ?? CryptoServiceError.keyImportFailed
+        }
+
+        try? deletePrivateKey(tag: KeyTag.signing)
+
+        guard let tagData = KeyTag.signing.data(using: .utf8) else {
+            throw CryptoServiceError.keyImportFailed
+        }
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassKey,
+            kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
+            kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
+            kSecAttrKeySizeInBits as String: 2048,
+            kSecAttrApplicationTag as String: tagData,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecValueRef as String: privateKey
+        ]
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        guard status == errSecSuccess || status == errSecDuplicateItem else {
+            throw CryptoServiceError.keyImportFailed
+        }
+        return privateKey
+    }
+
     // MARK: - Public Key Import
 
     func importPublicKeyFromPEM(_ pem: String) throws -> SecKey {
@@ -398,6 +461,72 @@ final class CryptoService {
         let spkiSequence: [UInt8] = [0x30] + encodeASN1Length(algorithmIdentifier.count + bitString.count) + algorithmIdentifier + bitString
 
         return Data(spkiSequence)
+    }
+
+    private func wrapRSAPrivateKeyPKCS8(pkcs1Der: Data) throws -> Data {
+        let version: [UInt8] = [0x02, 0x01, 0x00]
+        let algorithmIdentifier: [UInt8] = [
+            0x30, 0x0D,
+            0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01,
+            0x05, 0x00
+        ]
+        let octetStringPayload = [UInt8](pkcs1Der)
+        let octetString: [UInt8] = [0x04] + encodeASN1Length(octetStringPayload.count) + octetStringPayload
+        let body = version + algorithmIdentifier + octetString
+        let sequence: [UInt8] = [0x30] + encodeASN1Length(body.count) + body
+        return Data(sequence)
+    }
+
+    private func unwrapPKCS8ToPKCS1(pkcs8Der: Data) throws -> Data {
+        let bytes = [UInt8](pkcs8Der)
+        var index = 0
+
+        func readTLV(expectedTag: UInt8) throws -> (contentStart: Int, contentLength: Int) {
+            guard index < bytes.count, bytes[index] == expectedTag else {
+                throw CryptoServiceError.keyImportFailed
+            }
+            index += 1
+            let (length, consumed) = try decodeASN1Length(bytes, offset: index)
+            index += consumed
+            let start = index
+            index += length
+            guard index <= bytes.count else {
+                throw CryptoServiceError.keyImportFailed
+            }
+            return (start, length)
+        }
+
+        // Outer SEQUENCE
+        let outer = try readTLV(expectedTag: 0x30)
+        index = outer.contentStart
+
+        // version INTEGER
+        let version = try readTLV(expectedTag: 0x02)
+        _ = version
+
+        // AlgorithmIdentifier SEQUENCE (skip contents)
+        _ = try readTLV(expectedTag: 0x30)
+
+        // privateKey OCTET STRING — contents are PKCS#1 RSAPrivateKey
+        let octet = try readTLV(expectedTag: 0x04)
+        return Data(bytes[octet.contentStart ..< octet.contentStart + octet.contentLength])
+    }
+
+    private func decodeASN1Length(_ bytes: [UInt8], offset: Int) throws -> (length: Int, consumed: Int) {
+        guard offset < bytes.count else { throw CryptoServiceError.keyImportFailed }
+        let first = bytes[offset]
+        if first & 0x80 == 0 {
+            return (Int(first), 1)
+        }
+        let numBytes = Int(first & 0x7F)
+        guard numBytes > 0, offset + numBytes < bytes.count else {
+            throw CryptoServiceError.keyImportFailed
+        }
+        var length = 0
+        for i in 0..<numBytes {
+            length = (length << 8) | Int(bytes[offset + 1 + i])
+        }
+        return (length, 1 + numBytes)
     }
 
     private func encodeASN1Length(_ length: Int) -> [UInt8] {

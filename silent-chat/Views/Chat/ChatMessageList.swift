@@ -14,7 +14,9 @@ struct ChatMessageList: View {
                 ForEach(messages.enumerated(), id: \.element.id) { index, message in
                     ChatMessageRow(
                         message: message,
-                        showTimestamp: shouldShowTimestamp(at: index)
+                        peerAlias: peerAlias,
+                        showTimestamp: shouldShowTimestamp(at: index),
+                        messageViewModel: messageViewModel
                     ) {
                         downloadFile(fileId: $0)
                     }

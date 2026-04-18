@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import QuickLook
+import PhotosUI
 
 struct ChatDetailView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -8,6 +9,8 @@ struct ChatDetailView: View {
     let peerAlias: String
     @State private var messageText = ""
     @State private var isFileImporterPresented = false
+    @State private var isPhotoPickerPresented = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var previewURL: URL?
     @State private var isPreviewPresented = false
     @FocusState private var isMessageFieldFocused: Bool
@@ -15,6 +18,8 @@ struct ChatDetailView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            Divider()
+                .padding(.horizontal, -16)
 
             if messageViewModel.isInitiatingSession {
                 HStack(spacing: 8) {
@@ -40,6 +45,7 @@ struct ChatDetailView: View {
                 messageText: $messageText,
                 isMessageFieldFocused: $isMessageFieldFocused,
                 isFileImporterPresented: $isFileImporterPresented,
+                isPhotoPickerPresented: $isPhotoPickerPresented,
                 onSend: sendMessage
             )
             .sensoryFeedback(.impact(flexibility: .soft), trigger: sendTrigger)
@@ -82,6 +88,14 @@ struct ChatDetailView: View {
         ) { result in
             handleFileImport(result)
         }
+        .photosPicker(
+            isPresented: $isPhotoPickerPresented,
+            selection: $selectedPhotoItem,
+            matching: .images
+        )
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            handlePhotoPick(newItem)
+        }
         .sheet(isPresented: $isPreviewPresented) {
             if let previewURL {
                 QuickLookPreview(url: previewURL)
@@ -117,32 +131,47 @@ struct ChatDetailView: View {
         }
     }
 
+    private func handlePhotoPick(_ item: PhotosPickerItem?) {
+        guard let item,
+              let token = authViewModel.token,
+              let privateKey = authViewModel.privateKey else { return }
+
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self),
+               let uiImage = UIImage(data: data) {
+                guard let attachment = FileService.shared.makeAttachment(from: uiImage) else {
+                    messageViewModel.error = "Failed to process image."
+                    return
+                }
+                await messageViewModel.sendFileMessage(
+                    peerAlias: peerAlias,
+                    attachment: attachment,
+                    token: token,
+                    myPrivateKey: privateKey,
+                    senderAlias: authViewModel.alias
+                )
+            }
+            selectedPhotoItem = nil
+        }
+    }
+
     private func handleFileImport(_ result: Result<URL, Error>) {
         guard let token = authViewModel.token, let privateKey = authViewModel.privateKey else { return }
 
         switch result {
         case .success(let url):
             Task {
-                do {
-                    let needsAccess = url.startAccessingSecurityScopedResource()
-                    defer {
-                        if needsAccess {
-                            url.stopAccessingSecurityScopedResource()
-                        }
-                    }
-
-                    let data = try Data(contentsOf: url)
-                    await messageViewModel.sendFileMessage(
-                        peerAlias: peerAlias,
-                        fileName: url.lastPathComponent,
-                        fileData: data,
-                        token: token,
-                        myPrivateKey: privateKey,
-                        senderAlias: authViewModel.alias
-                    )
-                } catch {
-                    messageViewModel.error = error.localizedDescription
+                guard let attachment = FileService.shared.makeAttachment(from: url) else {
+                    messageViewModel.error = "Failed to process file."
+                    return
                 }
+                await messageViewModel.sendFileMessage(
+                    peerAlias: peerAlias,
+                    attachment: attachment,
+                    token: token,
+                    myPrivateKey: privateKey,
+                    senderAlias: authViewModel.alias
+                )
             }
         case .failure(let error):
             messageViewModel.error = error.localizedDescription

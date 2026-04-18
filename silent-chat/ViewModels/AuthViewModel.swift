@@ -49,6 +49,7 @@ final class AuthViewModel {
             statusMessage = "Completing registration..."
             try await authService.registerComplete(
                 alias: alias,
+                nonce: nonce,
                 publicKey: publicKeyPem,
                 signedNonce: signedNonce
             )
@@ -62,7 +63,7 @@ final class AuthViewModel {
             statusMessage = "Completing login..."
             let loginNonce = try await authService.loginChallenge(alias: alias)
             let signedLogin = try cryptoService.signData(loginNonce, with: keyPairs.signingKeyPair.privateKey)
-            let token = try await authService.loginComplete(alias: alias, signedChallenge: signedLogin)
+            let token = try await authService.loginComplete(alias: alias, nonce: loginNonce, signedChallenge: signedLogin)
             try keychainService.saveString(token, for: KeychainKeys.jwtToken)
             self.token = token
             try? keychainService.delete(key: KeychainKeys.sessionKeys)
@@ -95,7 +96,7 @@ final class AuthViewModel {
             let signedChallenge = try cryptoService.signData(nonce, with: signingPrivateKey)
 
             statusMessage = "Completing login..."
-            let token = try await authService.loginComplete(alias: alias, signedChallenge: signedChallenge)
+            let token = try await authService.loginComplete(alias: alias, nonce: nonce, signedChallenge: signedChallenge)
             try keychainService.saveString(token, for: KeychainKeys.jwtToken)
 
             self.privateKey = signingPrivateKey
@@ -175,7 +176,7 @@ final class AuthViewModel {
         do {
             let nonce = try await authService.loginChallenge(alias: storedAlias)
             let signedChallenge = try cryptoService.signData(nonce, with: signingPrivateKey)
-            let token = try await authService.loginComplete(alias: storedAlias, signedChallenge: signedChallenge)
+            let token = try await authService.loginComplete(alias: storedAlias, nonce: nonce, signedChallenge: signedChallenge)
             try keychainService.saveString(token, for: KeychainKeys.jwtToken)
             self.token = token
             try? keychainService.delete(key: KeychainKeys.sessionKeys)
@@ -213,6 +214,52 @@ final class AuthViewModel {
         try? keychainService.delete(key: LegacyKeychainKeys.encryptPublicKey)
 
         try? keychainService.saveString("true", for: KeychainKeys.keysMigrated)
+    }
+
+    // MARK: - Identity Export / Import
+
+    /// Writes the signing keypair to a temporary PEM file and returns its URL for sharing.
+    func exportIdentityFile() throws -> URL {
+        let trimmedAlias = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAlias.isEmpty else {
+            throw AuthViewModelError.missingSigningKey
+        }
+        let privatePem = try cryptoService.exportSigningPrivateKeyPEM()
+        let publicPem = try cryptoService.exportSigningPublicKeyPEM()
+        let contents = IdentityFileService.format(
+            alias: trimmedAlias,
+            privateKeyPEM: privatePem,
+            publicKeyPEM: publicPem
+        )
+        let filename = "\(trimmedAlias).pem"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try? FileManager.default.removeItem(at: url)
+        try contents.data(using: .utf8)?.write(to: url)
+        return url
+    }
+
+    /// Imports an identity PEM file, stores the signing key, and logs in with the embedded alias.
+    func importIdentityFile(at url: URL) async throws {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+
+        let data = try Data(contentsOf: url)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw IdentityFileError.invalidFormat
+        }
+        let parsed = try IdentityFileService.parse(text)
+
+        try? cryptoService.deleteExistingKeys()
+        let signingPrivateKey = try cryptoService.importSigningPrivateKeyFromPEM(parsed.privateKeyPEM)
+
+        self.privateKey = signingPrivateKey
+        if let publicKey = SecKeyCopyPublicKey(signingPrivateKey) {
+            self.publicKeyPem = try? cryptoService.exportPublicKeyPEM(publicKey)
+        }
+        try keychainService.saveString(parsed.alias, for: KeychainKeys.alias)
+        self.alias = parsed.alias
+
+        _ = try await login(alias: parsed.alias)
     }
 
     // MARK: - Private Helpers

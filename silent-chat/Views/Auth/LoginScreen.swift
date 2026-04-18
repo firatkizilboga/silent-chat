@@ -1,8 +1,10 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LoginScreen: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @State private var isRegisterMode = true
+    @State private var isImporterPresented = false
 
     var body: some View {
         @Bindable var authViewModel = authViewModel
@@ -62,8 +64,38 @@ struct LoginScreen: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
+
+            Divider().padding(.vertical, 4)
+
+            Button {
+                isImporterPresented = true
+            } label: {
+                Label("Import Identity from PEM", systemImage: "square.and.arrow.down")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(authViewModel.isLoading)
         }
         .padding()
+        .fileImporter(
+            isPresented: $isImporterPresented,
+            allowedContentTypes: [UTType(filenameExtension: "pem") ?? .data, .text, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task {
+                try? await authViewModel.importIdentityFile(at: url)
+            }
+        case .failure:
+            break
+        }
     }
 
     private func submit() {

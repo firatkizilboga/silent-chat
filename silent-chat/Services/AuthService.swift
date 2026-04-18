@@ -10,6 +10,7 @@ struct RegisterChallengeResponse: Codable {
 
 struct RegisterCompleteRequest: Codable {
     let alias: String
+    let nonce: String
     let publicKey: String
     let signedNonce: String
 }
@@ -24,6 +25,7 @@ struct LoginChallengeResponse: Codable {
 
 struct LoginCompleteRequest: Codable {
     let alias: String
+    let nonce: String
     let signedChallenge: String
 }
 
@@ -41,6 +43,7 @@ enum AuthServiceError: Error {
     case userNotFound
     case invalidSignature
     case challengeTimedOut
+    case aliasMismatch
 }
 
 extension AuthServiceError: LocalizedError {
@@ -62,6 +65,8 @@ extension AuthServiceError: LocalizedError {
             return "Invalid signature."
         case .challengeTimedOut:
             return "Challenge timed out."
+        case .aliasMismatch:
+            return "Alias does not match the challenge."
         case .serverError(let statusCode):
             return "Server error (\(statusCode))."
         }
@@ -84,8 +89,8 @@ final class AuthService {
         return response.nonce
     }
 
-    func registerComplete(alias: String, publicKey: String, signedNonce: String) async throws {
-        let requestBody = RegisterCompleteRequest(alias: alias, publicKey: publicKey, signedNonce: signedNonce)
+    func registerComplete(alias: String, nonce: String, publicKey: String, signedNonce: String) async throws {
+        let requestBody = RegisterCompleteRequest(alias: alias, nonce: nonce, publicKey: publicKey, signedNonce: signedNonce)
         let _: EmptyResponse = try await sendRequest(
             path: "/auth/register-complete",
             body: requestBody
@@ -101,8 +106,8 @@ final class AuthService {
         return response.nonce
     }
 
-    func loginComplete(alias: String, signedChallenge: String) async throws -> String {
-        let requestBody = LoginCompleteRequest(alias: alias, signedChallenge: signedChallenge)
+    func loginComplete(alias: String, nonce: String, signedChallenge: String) async throws -> String {
+        let requestBody = LoginCompleteRequest(alias: alias, nonce: nonce, signedChallenge: signedChallenge)
         let response: LoginCompleteResponse = try await sendRequest(
             path: "/auth/login-complete",
             body: requestBody
@@ -148,6 +153,8 @@ final class AuthService {
 
     private func mapError(statusCode: Int) -> AuthServiceError {
         switch statusCode {
+        case 400:
+            return .aliasMismatch
         case 409:
             return .aliasAlreadyTaken
         case 404:

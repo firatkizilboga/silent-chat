@@ -72,11 +72,13 @@ final class MessageViewModel {
     private let cryptoService = CryptoService()
     private let keychainService = KeychainService()
     private let webSocketService = WebSocketService()
+    private let fileService = FileService.shared
     private let modelContext: ModelContext
     private var localMessageCounter: Int = -1
     private var webSocketReconnectTask: Task<Void, Never>?
     private var currentToken: String?
     private var currentPrivateKey: SecKey?
+    private var inFlightAttachmentFetches: Set<Int> = []
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -178,6 +180,40 @@ final class MessageViewModel {
         }
     }
 
+    /// Fetches, decrypts, and parses a file attachment for inline display.
+    /// Updates the corresponding message in `messages` with the parsed `Attachment`.
+    func loadAttachment(for message: Message, peerAlias: String) async {
+        guard let fileId = message.fileId,
+              let token = currentToken,
+              let aesKey = sessionKeys[peerAlias] else { return }
+
+        // Skip if already loaded or a fetch is already in flight
+        if message.attachment != nil { return }
+        if inFlightAttachmentFetches.contains(message.id) { return }
+        inFlightAttachmentFetches.insert(message.id)
+        defer { inFlightAttachmentFetches.remove(message.id) }
+
+        do {
+            let response = try await apiClient.getFile(fileId: fileId, token: token)
+
+            let decryptedJSON = try cryptoService.decryptMessage(
+                aesKey: aesKey,
+                encryptedBase64: response.encryptedContent
+            )
+
+            guard let attachment = fileService.parseAttachment(from: decryptedJSON) else { return }
+
+            // Update the message in-place
+            if var peerMessages = messages[peerAlias],
+               let index = peerMessages.firstIndex(where: { $0.id == message.id }) {
+                peerMessages[index].attachment = attachment
+                messages[peerAlias] = peerMessages
+            }
+        } catch {
+            // Silently fail — the download button remains as fallback
+        }
+    }
+
     private func processInboundMessage(_ message: InboundMessage, myPrivateKey: SecKey, source: InboundSource) async {
         if seenSignatures.contains(message.signature) {
             if messageAlreadyStored(message) {
@@ -244,7 +280,9 @@ final class MessageViewModel {
         }
     }
 
-    func sendFileMessage(peerAlias: String, fileName: String, fileData: Data, token: String, myPrivateKey: SecKey, senderAlias: String) async {
+    /// Sends a file message using the Attachment model.
+    /// Serializes the attachment to JSON, encrypts and signs it, then POSTs as a FILE message.
+    func sendFileMessage(peerAlias: String, attachment: Attachment, token: String, myPrivateKey: SecKey, senderAlias: String) async {
         do {
             if sessionKeys[peerAlias] == nil {
                 await ensureSession(with: peerAlias, token: token, myPrivateKey: myPrivateKey)
@@ -254,19 +292,25 @@ final class MessageViewModel {
                 throw MessageViewModelError.missingSessionKey
             }
 
+            guard let jsonString = fileService.serializeAttachment(attachment) else {
+                self.error = "Failed to serialize file."
+                return
+            }
+
             addLocalMessage(
                 peerAlias: peerAlias,
                 senderAlias: senderAlias,
-                content: "File: \(fileName)",
+                content: attachment.name,
                 type: "FILE",
                 fileId: nil,
                 messageId: nil,
                 isServerId: false,
-                isOutgoing: true
+                isOutgoing: true,
+                attachment: attachment
             )
-            saveSentMessage(peerAlias: peerAlias, type: "FILE", content: fileName, timestamp: .now)
+            saveSentMessage(peerAlias: peerAlias, type: "FILE", content: attachment.name, timestamp: .now)
 
-            let encryptedMessage = try cryptoService.encryptData(aesKey: aesKey, data: fileData)
+            let encryptedMessage = try cryptoService.encryptMessage(aesKey: aesKey, plaintext: jsonString)
             let signature = try cryptoService.signData(encryptedMessage, with: myPrivateKey)
 
             let payload = OutgoingMessagePayload(
@@ -443,12 +487,7 @@ final class MessageViewModel {
     }
 
     private func handleFileMessage(_ message: InboundMessage, source: InboundSource) {
-        var fileId: String?
-        if let data = message.encryptedMessage.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let id = object["fileId"] as? String {
-            fileId = id
-        }
+        let fileId = fileService.extractFileId(from: message.encryptedMessage)
 
         addLocalMessage(
             peerAlias: message.senderAlias,
@@ -464,7 +503,7 @@ final class MessageViewModel {
         if currentPeer != message.senderAlias {
             unreadPeers.insert(message.senderAlias)
             if source == .webSocket {
-                showToast(text: "File received", senderAlias: message.senderAlias)
+                showToast(text: "📎 File received", senderAlias: message.senderAlias)
             }
         }
     }
@@ -486,7 +525,8 @@ final class MessageViewModel {
         timestamp: Date = .now,
         messageId: Int?,
         isServerId: Bool,
-        isOutgoing: Bool
+        isOutgoing: Bool,
+        attachment: Attachment? = nil
     ) {
         let localId: Int
         if let messageId {
@@ -498,7 +538,7 @@ final class MessageViewModel {
             localId = nextLocalMessageId()
         }
 
-        let message = Message(
+        var message = Message(
             id: localId,
             senderAlias: senderAlias,
             ciphertext: content,
@@ -507,6 +547,7 @@ final class MessageViewModel {
             fileId: fileId,
             isOutgoing: isOutgoing
         )
+        message.attachment = attachment
 
         var peerMessages = messages[peerAlias] ?? []
         peerMessages.removeAll { $0.id == localId }

@@ -34,7 +34,7 @@ actor TokenRefreshService {
 
             let nonce = try await authService.loginChallenge(alias: trimmedAlias)
             let signedChallenge = try cryptoService.signData(nonce, with: signingPrivateKey)
-            let token = try await authService.loginComplete(alias: trimmedAlias, signedChallenge: signedChallenge)
+            let token = try await authService.loginComplete(alias: trimmedAlias, nonce: nonce, signedChallenge: signedChallenge)
             try keychainService.saveString(token, for: KeychainKeys.jwtToken)
             return token
         }

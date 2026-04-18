@@ -4,10 +4,19 @@ struct ChatMessageInput: View {
     @Binding var messageText: String
     var isMessageFieldFocused: FocusState<Bool>.Binding
     @Binding var isFileImporterPresented: Bool
+    @Binding var isPhotoPickerPresented: Bool
     let onSend: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
+            Button("Photo", systemImage: "photo") {
+                isPhotoPickerPresented = true
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .circleGlassEffect()
+
             Button("Attach File", systemImage: "paperclip") {
                 isFileImporterPresented = true
             }
