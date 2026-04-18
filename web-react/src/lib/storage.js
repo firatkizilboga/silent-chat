@@ -197,6 +197,28 @@ class StorageService {
 
 export const db = new StorageService();
 
+export async function decryptStoredMessages(records, atRestKey) {
+    if (!atRestKey) return records;
+
+    const decrypted = await Promise.all(records.map(async record => {
+        if (!record.encrypted) return record; // legacy unencrypted
+        try {
+            const data = await decryptAtRest(atRestKey, record.encrypted);
+            return { ...data, peer: record.peer, timestamp: record.timestamp, msgId: record.msgId, id: record.id };
+        } catch {
+            console.error('[Storage] Failed to decrypt message id:', record.id);
+            return null;
+        }
+    }));
+
+    return decrypted.filter(Boolean);
+}
+
+export async function loadPeerMessages(peer, atRestKey, { limit = 100, before = Date.now() + 1e12 } = {}) {
+    const records = await db.getMessagesByPeer(peer, null, { limit, before });
+    return decryptStoredMessages(records, atRestKey);
+}
+
 // ========================================
 // Session Keys
 // ========================================
@@ -356,7 +378,7 @@ export async function loadState(atRestKey) {
         const peers = [...new Set(allRecords.map(r => r.peer))];
         const messages = {};
         for (const peer of peers) {
-            messages[peer] = await db.getMessagesByPeer(peer, atRestKey, { limit: 100 });
+            messages[peer] = await db.getMessagesByPeer(peer, null, { limit: 100 });
         }
 
         const activeSessions = await loadSessionKeys(atRestKey);

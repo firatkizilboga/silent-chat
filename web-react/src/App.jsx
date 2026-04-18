@@ -2,7 +2,7 @@
  * SilentChat - Main App Component
  */
 
-import { AppProvider, useApp } from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext.jsx';
 import LoginScreen from './components/LoginScreen';
 import ChatScreen from './components/ChatScreen';
 import PassphraseScreen from './components/PassphraseScreen';

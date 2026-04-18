@@ -2,7 +2,7 @@
  * SilentChat - Message List Component
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { escapeHtml, formatFileSize, getFileIcon } from '../lib/utils';
 
 function Attachment({ attachment, onImageLoad }) {
@@ -52,8 +52,17 @@ function Attachment({ attachment, onImageLoad }) {
     );
 }
 
-export default function MessageList({ messages, currentPeer }) {
+export default function MessageList({ messages, currentPeer, isLoading = false, hasMore = false, onLoadOlder }) {
     const containerRef = useRef(null);
+    const prevSnapshotRef = useRef(null);
+    const shouldAutoScrollRef = useRef(true);
+    const olderLoadAnchorRef = useRef(null);
+
+    const sortedMessages = useMemo(
+        () => [...messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)),
+        [messages]
+    );
+    const getMessageKey = (message) => `${message?.msgId ?? message?.id ?? ''}:${message?.timestamp ?? 0}`;
 
     const scrollToBottom = () => {
         if (containerRef.current) {
@@ -61,17 +70,56 @@ export default function MessageList({ messages, currentPeer }) {
         }
     };
 
-    // Auto-scroll to bottom when messages change
+    const handleLoadOlder = () => {
+        const container = containerRef.current;
+        if (container) {
+            olderLoadAnchorRef.current = {
+                scrollHeight: container.scrollHeight,
+                scrollTop: container.scrollTop
+            };
+        }
+        onLoadOlder?.();
+    };
+
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const newest = sortedMessages[sortedMessages.length - 1];
+        const newestKey = newest ? getMessageKey(newest) : null;
+        const prev = prevSnapshotRef.current;
+
+        if (olderLoadAnchorRef.current) {
+            const anchor = olderLoadAnchorRef.current;
+            const heightDelta = container.scrollHeight - anchor.scrollHeight;
+            container.scrollTop = anchor.scrollTop + heightDelta;
+            olderLoadAnchorRef.current = null;
+            shouldAutoScrollRef.current = false;
+        } else {
+            shouldAutoScrollRef.current = true;
+        }
+
+        prevSnapshotRef.current = {
+            count: sortedMessages.length,
+            newestKey,
+            scrollHeight: container.scrollHeight,
+            scrollTop: container.scrollTop
+        };
+    }, [sortedMessages]);
+
+    // Auto-scroll to bottom for new messages, not older-page prepends
     useEffect(() => {
+        if (!shouldAutoScrollRef.current) return;
         scrollToBottom();
-        // Also scroll after a small delay to handle layout shifts
         const timeout = setTimeout(scrollToBottom, 50);
         return () => clearTimeout(timeout);
-    }, [messages]);
+    }, [sortedMessages]);
 
     // Handle image load to scroll again if needed
     const handleImageLoad = () => {
-        scrollToBottom();
+        if (shouldAutoScrollRef.current) {
+            scrollToBottom();
+        }
     };
 
     if (!currentPeer) {
@@ -80,6 +128,17 @@ export default function MessageList({ messages, currentPeer }) {
                 <div className="empty-state" id="emptyState">
                     <div className="empty-icon">💬</div>
                     <p>Select a chat to start messaging</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (isLoading && messages.length === 0) {
+        return (
+            <div className="messages-container" id="messagesContainer" ref={containerRef}>
+                <div className="empty-state" id="emptyState">
+                    <div className="empty-icon">🔓</div>
+                    <p>Decrypting messages...</p>
                 </div>
             </div>
         );
@@ -96,11 +155,6 @@ export default function MessageList({ messages, currentPeer }) {
         );
     }
 
-    // Sort messages by timestamp to ensure correct order
-    const sortedMessages = [...messages].sort((a, b) => {
-        return (a.timestamp || 0) - (b.timestamp || 0);
-    });
-
     const getDayLabel = (timestamp) => {
         const date = new Date(timestamp);
         const today = new Date();
@@ -113,6 +167,13 @@ export default function MessageList({ messages, currentPeer }) {
 
     return (
         <div className="messages-container" id="messagesContainer" ref={containerRef}>
+            {hasMore && (
+                <div className="empty-state">
+                    <button className="import-identity-btn" onClick={handleLoadOlder} disabled={isLoading}>
+                        load older messages
+                    </button>
+                </div>
+            )}
             {sortedMessages.map((msg, index) => {
                 const isSent = msg.sender === 'Me';
                 const prevMsg = sortedMessages[index - 1];

@@ -3,13 +3,13 @@
  */
 
 import { useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/AppContext.jsx';
 import Sidebar from './Sidebar';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 
 export default function ChatScreen() {
-    const { state, dispatch, logout, exportIdentity } = useApp();
+    const { state, dispatch, logout, exportIdentity, loadOlderMessages } = useApp();
     const [sidebarOpen, setSidebarOpen] = useState(true);
 
     const selectPeer = (peer) => {
@@ -63,6 +63,9 @@ export default function ChatScreen() {
                 <MessageList
                     messages={state.currentPeer ? state.messages[state.currentPeer] || [] : []}
                     currentPeer={state.currentPeer}
+                    isLoading={state.loadingMessagesPeer === state.currentPeer}
+                    hasMore={!!state.currentPeer && !!state.peerHistoryMeta[state.currentPeer]?.hasMore}
+                    onLoadOlder={() => state.currentPeer && loadOlderMessages(state.currentPeer)}
                 />
 
                 <div className="input-area">

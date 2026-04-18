@@ -3,7 +3,7 @@
  */
 
 import { useState, useRef } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/AppContext.jsx';
 import { requestNotificationPermission } from '../lib/utils';
 
 export default function LoginScreen() {

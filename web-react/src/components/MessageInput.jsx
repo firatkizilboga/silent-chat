@@ -4,7 +4,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/AppContext.jsx';
 import { sendMessage, sendFile } from '../lib/api';
 
 export default function MessageInput({ currentPeer, disabled }) {

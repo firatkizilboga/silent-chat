@@ -69,6 +69,8 @@ export default function Sidebar({
                         const lastMsg = msgs[msgs.length - 1];
                         const preview = lastMsg?.attachment
                             ? 'Sent an attachment'
+                            : lastMsg?.encrypted
+                                ? 'Encrypted messages'
                             : lastMsg?.text || 'No messages';
 
                         return (

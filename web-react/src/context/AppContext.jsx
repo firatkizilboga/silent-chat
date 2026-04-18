@@ -4,13 +4,14 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 
-import { createContext, useContext, useReducer, useEffect, useRef } from 'react';
-import { loadState, saveState as persistState, db, loadKeys, saveKeys, saveSessionKeys } from '../lib/storage.js';
+import { createContext, useContext, useReducer, useEffect, useLayoutEffect, useRef } from 'react';
+import { loadState, saveState as persistState, db, loadKeys, saveKeys, saveSessionKeys, loadPeerMessages } from '../lib/storage.js';
 import { registerAndLogin, refreshToken, pollMessages, connectWebSocket, sendWebSocketPing, handleIncomingMessage, processTextOrFileMessage } from '../lib/api.js';
-import { generateSalt, deriveAtRestKey, encryptAtRest } from '../lib/crypto.js';
+import { generateSalt, deriveAtRestKey } from '../lib/crypto.js';
 import { arrayBufferToPem, pemToArrayBuffer } from '../lib/utils.js';
 
-const AppContext = createContext(null);
+export const AppContext = createContext(null);
+const PAGE_SIZE = 5;
 
 const initialState = {
     // Auth
@@ -33,6 +34,8 @@ const initialState = {
     // UI
     currentPeer: null,
     messages: {},
+    peerHistoryMeta: {},
+    loadingMessagesPeer: null,
     seenSignatures: new Set(),
     lastMessageId: 0,
 
@@ -43,6 +46,31 @@ const initialState = {
     loginStatus: '',
     loginError: null
 };
+
+function getMessageKey(message) {
+    if (message?.msgId !== undefined && message?.msgId !== null) return `msg:${message.msgId}`;
+    if (message?.id !== undefined && message?.id !== null) return `id:${message.id}`;
+
+    const attachmentKey = message?.attachment ? JSON.stringify(message.attachment) : '';
+    return [
+        message?.peer || '',
+        message?.sender || '',
+        message?.timestamp || 0,
+        message?.text || '',
+        attachmentKey
+    ].join('|');
+}
+
+function mergePeerMessages(existingMessages = [], incomingMessages = []) {
+    const merged = new Map();
+    for (const message of existingMessages) {
+        merged.set(getMessageKey(message), message);
+    }
+    for (const message of incomingMessages) {
+        merged.set(getMessageKey(message), message);
+    }
+    return [...merged.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
 
 function appReducer(state, action) {
     switch (action.type) {
@@ -99,6 +127,32 @@ function appReducer(state, action) {
         case 'SELECT_PEER':
             return { ...state, currentPeer: action.peer };
 
+        case 'SET_LOADING_MESSAGES_PEER':
+            return { ...state, loadingMessagesPeer: action.peer };
+
+        case 'SET_PEER_MESSAGES': {
+            return {
+                ...state,
+                messages: {
+                    ...state.messages,
+                    [action.peer]: mergePeerMessages([], action.messages)
+                },
+                loadingMessagesPeer: state.loadingMessagesPeer === action.peer ? null : state.loadingMessagesPeer
+            };
+        }
+
+        case 'SET_PEER_HISTORY_META':
+            return {
+                ...state,
+                peerHistoryMeta: {
+                    ...state.peerHistoryMeta,
+                    [action.peer]: {
+                        hasMore: action.hasMore,
+                        oldestTimestamp: action.oldestTimestamp
+                    }
+                }
+            };
+
         case 'INIT_PEER':
             if (state.messages[action.peer]) return state;
             return {
@@ -150,6 +204,7 @@ function appReducer(state, action) {
 export function AppProvider({ children }) {
     const [state, dispatch] = useReducer(appReducer, initialState);
     const stateRef = useRef(state);
+    const loadingPeerRef = useRef(null);
 
     useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -159,6 +214,103 @@ export function AppProvider({ children }) {
             persistState(state, state.atRestKey);
         }
     }, [state.messages, state.seenSignatures, state.lastMessageId, state.activeSessions, state.pendingMessages, state.isLoggedIn, state.alias, state.atRestKey]);
+
+    useLayoutEffect(() => {
+        if (!state.isLoggedIn || !state.atRestKey || !state.currentPeer) {
+            loadingPeerRef.current = null;
+            dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer: null });
+            return;
+        }
+
+        const peer = state.currentPeer;
+        const peerMessages = state.messages[peer] || [];
+        if (loadingPeerRef.current === peer) {
+            return;
+        }
+        if (!peerMessages.some(message => message.encrypted)) {
+            loadingPeerRef.current = null;
+            dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer: null });
+            return;
+        }
+
+        let cancelled = false;
+        loadingPeerRef.current = peer;
+        dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer });
+
+        (async () => {
+            try {
+                const decryptedMessages = await loadPeerMessages(peer, state.atRestKey, { limit: PAGE_SIZE + 1 });
+                if (cancelled) return;
+                const hasMore = decryptedMessages.length > PAGE_SIZE;
+                const pageMessages = hasMore ? decryptedMessages.slice(1) : decryptedMessages;
+                const latestMessages = (stateRef.current.messages[peer] || []).filter(message => !message.encrypted);
+                const merged = mergePeerMessages(latestMessages, pageMessages);
+                dispatch({
+                    type: 'SET_PEER_MESSAGES',
+                    peer,
+                    messages: merged
+                });
+                dispatch({
+                    type: 'SET_PEER_HISTORY_META',
+                    peer,
+                    hasMore,
+                    oldestTimestamp: merged[0]?.timestamp || null
+                });
+            } catch (e) {
+                if (!cancelled) {
+                    console.error('[Storage] Failed to load peer messages:', e);
+                    dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer: null });
+                }
+            } finally {
+                if (!cancelled && loadingPeerRef.current === peer) {
+                    loadingPeerRef.current = null;
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            if (loadingPeerRef.current === peer) {
+                loadingPeerRef.current = null;
+            }
+        };
+    }, [state.currentPeer, state.atRestKey, state.isLoggedIn, state.messages]);
+
+    const loadOlderMessages = async (peer) => {
+        if (!peer || loadingPeerRef.current === peer) return;
+
+        const meta = stateRef.current.peerHistoryMeta?.[peer];
+        if (!meta?.hasMore || !meta.oldestTimestamp || !stateRef.current.atRestKey) return;
+
+        loadingPeerRef.current = peer;
+        dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer });
+
+        try {
+            const decryptedMessages = await loadPeerMessages(peer, stateRef.current.atRestKey, {
+                limit: PAGE_SIZE + 1,
+                before: meta.oldestTimestamp
+            });
+            const hasMore = decryptedMessages.length > PAGE_SIZE;
+            const pageMessages = hasMore ? decryptedMessages.slice(1) : decryptedMessages;
+            const currentMessages = (stateRef.current.messages[peer] || []).filter(message => !message.encrypted);
+            const merged = mergePeerMessages(pageMessages, currentMessages);
+
+            dispatch({ type: 'SET_PEER_MESSAGES', peer, messages: merged });
+            dispatch({
+                type: 'SET_PEER_HISTORY_META',
+                peer,
+                hasMore,
+                oldestTimestamp: merged[0]?.timestamp || null
+            });
+        } catch (e) {
+            console.error('[Storage] Failed to load older peer messages:', e);
+            dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer: null });
+        } finally {
+            if (loadingPeerRef.current === peer) {
+                loadingPeerRef.current = null;
+            }
+        }
+    };
 
     // Load saved state on mount
     useEffect(() => {
@@ -433,7 +585,7 @@ export function AppProvider({ children }) {
         }
     };
 
-    const value = { state, dispatch, login, logout, unlockWithPassphrase, setupPassphrase, exportIdentity, importIdentity };
+    const value = { state, dispatch, login, logout, unlockWithPassphrase, setupPassphrase, exportIdentity, importIdentity, loadOlderMessages };
 
     return (
         <AppContext.Provider value={value}>
