@@ -279,6 +279,12 @@ export function AppProvider({ children }) {
                 const pageMessages = hasMore ? decryptedMessages.slice(1) : decryptedMessages;
                 const latestMessages = (stateRef.current.messages[peer] || []).filter(message => !message.encrypted);
                 const merged = mergePeerMessages(latestMessages, pageMessages);
+                
+                // Keep loading animation visible for at least 400ms for UX feedback
+                await new Promise(resolve => setTimeout(resolve, 400));
+                
+                if (cancelled) return;
+                
                 dispatch({
                     type: 'SET_PEER_MESSAGES',
                     peer,
@@ -328,6 +334,9 @@ export function AppProvider({ children }) {
             const pageMessages = hasMore ? decryptedMessages.slice(1) : decryptedMessages;
             const currentMessages = (stateRef.current.messages[peer] || []).filter(message => !message.encrypted);
             const merged = mergePeerMessages(pageMessages, currentMessages);
+
+            // Keep loading animation visible for at least 400ms for UX feedback
+            await new Promise(resolve => setTimeout(resolve, 400));
 
             dispatch({ type: 'SET_PEER_MESSAGES', peer, messages: merged });
             dispatch({

@@ -39,6 +39,7 @@ export default function ChatScreen() {
                 onExportIdentity={exportIdentity}
                 unreadPeers={state.unreadPeers}
                 peerLastMessage={state.peerLastMessage}
+                isDecrypting={!!state.loadingMessagesPeer}
             />
 
             <main className="chat-main">

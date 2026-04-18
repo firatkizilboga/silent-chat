@@ -15,6 +15,7 @@ export default function Sidebar({
     onExportIdentity,
     unreadPeers = new Set(),
     peerLastMessage = {},
+    isDecrypting = false,
 }) {
     const [newChatInput, setNewChatInput] = useState('');
     const peers = Object.keys(messages);
@@ -40,7 +41,7 @@ export default function Sidebar({
     return (
         <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
             <div className="sidebar-header">
-                <h1>silentchat</h1>
+                <h1 className={isDecrypting ? 'animating-crypto' : ''}>silentchat</h1>
             </div>
 
             <div className="new-chat-section">
