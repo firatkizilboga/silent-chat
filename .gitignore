@@ -32,3 +32,8 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+
+# Build artifacts and external deps
+libsilent/
+tui/external/ftxui/
+nohup.out
