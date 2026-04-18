@@ -69,32 +69,6 @@ Each conversation uses a dedicated AES-256 session key:
 
 Messages that arrive before a session is established are queued and automatically decrypted once the key exchange completes.
 
-## API
-
-The app communicates with a backend at `silentchat-api.firatkizilboga.com`.
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/auth/register-challenge` | Request registration nonce |
-| POST | `/auth/register-complete` | Complete registration |
-| POST | `/auth/login-challenge` | Request login nonce |
-| POST | `/auth/login-complete` | Complete login, receive JWT |
-| GET | `/keys/{alias}` | Fetch a user's public key |
-| POST | `/messages` | Send an encrypted message |
-| GET | `/messages?since={id}` | Fetch missed messages |
-| GET | `/files/{fileId}` | Download an encrypted file |
-| WSS | `/ws?token={token}` | Real-time message stream |
-
-## Getting Started
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/silent-chat.git
-   ```
-2. Open `silent-chat.xcodeproj` in Xcode.
-3. Build and run on a device or simulator running iOS 26.0+.
-4. Register with a unique alias — your cryptographic keys are generated automatically.
-
 ## License
 
 This project is provided as-is for educational and personal use.
