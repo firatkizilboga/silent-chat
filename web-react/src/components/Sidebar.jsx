@@ -13,6 +13,8 @@ export default function Sidebar({
     onSelectPeer,
     onCreateChat,
     onExportIdentity,
+    unreadPeers = new Set(),
+    peerLastMessage = {},
 }) {
     const [newChatInput, setNewChatInput] = useState('');
     const peers = Object.keys(messages);
@@ -24,10 +26,14 @@ export default function Sidebar({
         }
     };
 
-    // Sort peers by last message time
+    // Sort peers: unread first, then by last message time (newest first), then by name
     const sortedPeers = [...peers].sort((a, b) => {
-        const aLast = messages[a]?.[messages[a].length - 1]?.timestamp || 0;
-        const bLast = messages[b]?.[messages[b].length - 1]?.timestamp || 0;
+        const aUnread = unreadPeers.has(a) ? 0 : 1;
+        const bUnread = unreadPeers.has(b) ? 0 : 1;
+        if (aUnread !== bUnread) return aUnread - bUnread;
+        
+        const aLast = peerLastMessage[a]?.timestamp || messages[a]?.[messages[a]?.length - 1]?.timestamp || 0;
+        const bLast = peerLastMessage[b]?.timestamp || messages[b]?.[messages[b]?.length - 1]?.timestamp || 0;
         return bLast - aLast;
     });
 
@@ -35,9 +41,6 @@ export default function Sidebar({
         <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
             <div className="sidebar-header">
                 <h1>silentchat</h1>
-                <button className="close-sidebar-btn" onClick={() => onSelectPeer(currentPeer)}>
-                    ×
-                </button>
             </div>
 
             <div className="new-chat-section">
@@ -66,17 +69,16 @@ export default function Sidebar({
                 ) : (
                     sortedPeers.map((peer) => {
                         const msgs = messages[peer] || [];
-                        const lastMsg = msgs[msgs.length - 1];
+                        const lastMsg = msgs[msgs.length - 1] || peerLastMessage[peer];
+                        const isUnread = unreadPeers.has(peer);
                         const preview = lastMsg?.attachment
                             ? 'Sent an attachment'
-                            : lastMsg?.encrypted
-                                ? 'Encrypted messages'
                             : lastMsg?.text || 'No messages';
 
                         return (
                             <div
                                 key={peer}
-                                className={`chat-item ${peer === currentPeer ? 'active' : ''}`}
+                                className={`chat-item ${peer === currentPeer ? 'active' : ''} ${isUnread ? 'unread' : ''}`}
                                 onClick={() => onSelectPeer(peer)}
                             >
                                 <div className="chat-item-info">

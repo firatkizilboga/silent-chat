@@ -37,6 +37,8 @@ export default function ChatScreen() {
                 onCreateChat={createChat}
                 onLogout={logout}
                 onExportIdentity={exportIdentity}
+                unreadPeers={state.unreadPeers}
+                peerLastMessage={state.peerLastMessage}
             />
 
             <main className="chat-main">

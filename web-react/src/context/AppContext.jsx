@@ -11,7 +11,7 @@ import { generateSalt, deriveAtRestKey } from '../lib/crypto.js';
 import { arrayBufferToPem, pemToArrayBuffer } from '../lib/utils.js';
 
 export const AppContext = createContext(null);
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 20;
 
 const initialState = {
     // Auth
@@ -36,6 +36,8 @@ const initialState = {
     messages: {},
     peerHistoryMeta: {},
     loadingMessagesPeer: null,
+    peerLastMessage: {},  // latest message per peer for sidebar preview + sorting
+    unreadPeers: new Set(),  // peers with unread/unopened messages
     seenSignatures: new Set(),
     lastMessageId: 0,
 
@@ -131,11 +133,16 @@ function appReducer(state, action) {
             return { ...state, loadingMessagesPeer: action.peer };
 
         case 'SET_PEER_MESSAGES': {
+            const messages = mergePeerMessages([], action.messages);
             return {
                 ...state,
                 messages: {
                     ...state.messages,
-                    [action.peer]: mergePeerMessages([], action.messages)
+                    [action.peer]: messages
+                },
+                peerLastMessage: {
+                    ...state.peerLastMessage,
+                    [action.peer]: messages[messages.length - 1] || state.peerLastMessage[action.peer]
                 },
                 loadingMessagesPeer: state.loadingMessagesPeer === action.peer ? null : state.loadingMessagesPeer
             };
@@ -153,6 +160,18 @@ function appReducer(state, action) {
                 }
             };
 
+        case 'MARK_PEER_UNREAD':
+            return {
+                ...state,
+                unreadPeers: new Set([...state.unreadPeers, action.peer])
+            };
+
+        case 'MARK_PEER_READ':
+            return {
+                ...state,
+                unreadPeers: new Set([...state.unreadPeers].filter(p => p !== action.peer))
+            };
+
         case 'INIT_PEER':
             if (state.messages[action.peer]) return state;
             return {
@@ -165,9 +184,15 @@ function appReducer(state, action) {
             if (action.message.msgId && peerMsgs.some(m => m.msgId === action.message.msgId)) {
                 return state;
             }
+            // Mark peer as unread if it's not the currently selected peer
+            const unreadUpdate = state.currentPeer !== action.peer
+                ? new Set([...state.unreadPeers, action.peer])
+                : state.unreadPeers;
             return {
                 ...state,
-                messages: { ...state.messages, [action.peer]: [...peerMsgs, action.message] }
+                messages: { ...state.messages, [action.peer]: [...peerMsgs, action.message] },
+                peerLastMessage: { ...state.peerLastMessage, [action.peer]: action.message },
+                unreadPeers: unreadUpdate
             };
         }
 
@@ -224,10 +249,19 @@ export function AppProvider({ children }) {
 
         const peer = state.currentPeer;
         const peerMessages = state.messages[peer] || [];
+        
+        // Mark peer as read when selected
+        dispatch({ type: 'MARK_PEER_READ', peer });
+        
+        // Skip if already loading this peer
         if (loadingPeerRef.current === peer) {
             return;
         }
-        if (!peerMessages.some(message => message.encrypted)) {
+        
+        // Skip if messages already decrypted (no encrypted placeholders and not empty, or just loaded)
+        const hasEncrypted = peerMessages.some(message => message.encrypted);
+        const isNewPeer = peerMessages.length === 0;
+        if (!hasEncrypted && !isNewPeer) {
             loadingPeerRef.current = null;
             dispatch({ type: 'SET_LOADING_MESSAGES_PEER', peer: null });
             return;

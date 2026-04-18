@@ -368,22 +368,43 @@ export async function loadState(atRestKey) {
     try {
         const token = await decryptConfig('token', atRestKey, null);
         const lastMessageId = await db.getConfig('lastMessageId') || 0;
-        const currentPeer = await decryptConfig('currentPeer', atRestKey, null);
         const seenSigsArr = await decryptConfig('seenSignatures', atRestKey, []);
         const seenSignatures = new Set(seenSigsArr);
         const pendingMessages = await decryptConfig('pendingMessages', atRestKey, {});
 
-        // Load per-peer messages (latest 100 each)
+        // Load only peer list (keys from DB) but NOT their messages — decrypt on demand per peer
         const allRecords = await db.getAllMessages();
         const peers = [...new Set(allRecords.map(r => r.peer))];
         const messages = {};
+        const peerLastMessage = {};
+        
         for (const peer of peers) {
-            messages[peer] = await db.getMessagesByPeer(peer, null, { limit: 100 });
+            messages[peer] = []; // empty placeholder for each peer
+            // Get the latest message per peer (without decrypting) to use for sidebar sorting
+            const latestRecord = await new Promise((resolve, reject) => {
+                const tx = db.db.transaction('messages', 'readonly');
+                const store = tx.objectStore('messages');
+                const index = store.index('peer_timestamp');
+                const range = IDBKeyRange.bound([peer, 0], [peer, Date.now() + 1e12], false, true);
+                
+                const req = index.openCursor(range, 'prev');
+                req.onsuccess = e => {
+                    const cursor = e.target.result;
+                    resolve(cursor ? cursor.value : null);
+                };
+                req.onerror = () => reject(req.error);
+            });
+            if (latestRecord) {
+                // Store encrypted message (or plaintext if unencrypted) for preview
+                peerLastMessage[peer] = latestRecord.encrypted 
+                    ? { ...latestRecord, text: '[encrypted]' }
+                    : latestRecord;
+            }
         }
 
         const activeSessions = await loadSessionKeys(atRestKey);
 
-        return { alias, token, lastMessageId, currentPeer, seenSignatures, pendingMessages, messages, activeSessions };
+        return { alias, token, lastMessageId, seenSignatures, pendingMessages, messages, peerLastMessage, activeSessions };
     } catch (e) {
         if (e.message?.includes('decryption') || e.name === 'OperationError') {
             throw new Error('WRONG_PASSPHRASE');
