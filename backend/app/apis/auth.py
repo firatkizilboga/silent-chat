@@ -17,7 +17,7 @@ from cryptography.exceptions import InvalidSignature
 
 router = APIRouter()
 
-# WARNING: In-memory storage is for development only.
+# Keyed by nonce so multiple clients can have concurrent challenges.
 challenge_storage = {}
 
 
@@ -29,15 +29,14 @@ async def register_challenge(request: AliasRequest):
         )
 
     nonce = secrets.token_urlsafe(32)
-    challenge_storage[request.alias] = {
-        "nonce": nonce, "timestamp": datetime.now(UTC)}
+    challenge_storage[nonce] = {
+        "alias": request.alias, "timestamp": datetime.now(UTC)}
     return ChallengeResponse(nonce=nonce)
 
 
 @router.post("/register-complete", status_code=status.HTTP_201_CREATED)
 async def register_complete(request: RegisterCompleteRequest):
-    alias = request.alias
-    challenge_info = challenge_storage.get(alias)
+    challenge_info = challenge_storage.get(request.nonce)
 
     if not challenge_info:
         raise HTTPException(
@@ -45,7 +44,13 @@ async def register_complete(request: RegisterCompleteRequest):
             detail="Challenge not found or expired",
         )
 
+    if challenge_info["alias"] != request.alias:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Alias mismatch"
+        )
+
     if datetime.now(UTC) - challenge_info["timestamp"] > timedelta(minutes=5):
+        del challenge_storage[request.nonce]
         raise HTTPException(
             status_code=status.HTTP_408_REQUEST_TIMEOUT, detail="Challenge expired"
         )
@@ -55,22 +60,20 @@ async def register_complete(request: RegisterCompleteRequest):
             request.publicKey.encode("utf-8")
         )
         signature = base64.b64decode(request.signedNonce)
-        nonce_bytes = challenge_info["nonce"].encode("utf-8")
-        public_key.verify(signature, nonce_bytes,
+        public_key.verify(signature, request.nonce.encode("utf-8"),
                           padding.PKCS1v15(), hashes.SHA256())
     except InvalidSignature:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature"
         )
-
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid public key or signature format",
         )
 
-    await db.add_user({"alias": alias, "publicKey": request.publicKey})
-    del challenge_storage[alias]
+    await db.add_user({"alias": request.alias, "publicKey": request.publicKey})
+    del challenge_storage[request.nonce]
 
     return {"message": "User registered successfully"}
 
@@ -83,8 +86,8 @@ async def login_challenge(request: AliasRequest):
         )
 
     nonce = secrets.token_urlsafe(32)
-    challenge_storage[request.alias] = {
-        "nonce": nonce,
+    challenge_storage[nonce] = {
+        "alias": request.alias,
         "timestamp": datetime.now(UTC),
         "type": "login",
     }
@@ -93,9 +96,8 @@ async def login_challenge(request: AliasRequest):
 
 @router.post("/login-complete", response_model=TokenResponse)
 async def login_complete(request: LoginCompleteRequest):
-    alias = request.alias
-    challenge_info = challenge_storage.get(alias)
-    user_info = await db.get_user(alias)
+    challenge_info = challenge_storage.get(request.nonce)
+    user_info = await db.get_user(request.alias)
 
     if not user_info:
         raise HTTPException(
@@ -107,7 +109,14 @@ async def login_complete(request: LoginCompleteRequest):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Login challenge not found or invalid",
         )
+
+    if challenge_info["alias"] != request.alias:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Alias mismatch"
+        )
+
     if datetime.now(UTC) - challenge_info["timestamp"] > timedelta(minutes=5):
+        del challenge_storage[request.nonce]
         raise HTTPException(
             status_code=status.HTTP_408_REQUEST_TIMEOUT, detail="Challenge expired"
         )
@@ -117,8 +126,7 @@ async def login_complete(request: LoginCompleteRequest):
             user_info["publicKey"].encode("utf-8")
         )
         signature = base64.b64decode(request.signedChallenge)
-        nonce_bytes = challenge_info["nonce"].encode("utf-8")
-        public_key.verify(signature, nonce_bytes,
+        public_key.verify(signature, request.nonce.encode("utf-8"),
                           padding.PKCS1v15(), hashes.SHA256())
     except InvalidSignature:
         raise HTTPException(
@@ -129,6 +137,6 @@ async def login_complete(request: LoginCompleteRequest):
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature format"
         )
 
-    del challenge_storage[alias]
-    access_token = create_access_token(data={"sub": alias})
+    del challenge_storage[request.nonce]
+    access_token = create_access_token(data={"sub": request.alias})
     return {"token": access_token}

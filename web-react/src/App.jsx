@@ -5,6 +5,7 @@
 import { AppProvider, useApp } from './context/AppContext';
 import LoginScreen from './components/LoginScreen';
 import ChatScreen from './components/ChatScreen';
+import PassphraseScreen from './components/PassphraseScreen';
 import './index.css';
 
 function AppContent() {
@@ -17,6 +18,10 @@ function AppContent() {
         <p>Loading...</p>
       </div>
     );
+  }
+
+  if (state.needsPassphrase || state.needsPassphraseSetup) {
+    return <PassphraseScreen />;
   }
 
   return state.isLoggedIn ? <ChatScreen /> : <LoginScreen />;

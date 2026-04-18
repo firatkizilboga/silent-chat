@@ -90,7 +90,7 @@ export default function MessageInput({ currentPeer, disabled }) {
                 className="icon-btn attach-btn"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || sending}
-                title="Attach file"
+                title="attach file"
             >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
@@ -102,7 +102,7 @@ export default function MessageInput({ currentPeer, disabled }) {
                 className="icon-btn camera-btn"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled || sending}
-                title="Take photo"
+                title="take photo"
             >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -114,7 +114,7 @@ export default function MessageInput({ currentPeer, disabled }) {
                 type="text"
                 id="messageInput"
                 ref={inputRef}
-                placeholder={disabled ? "Select a chat" : "Message..."}
+                placeholder={disabled ? "select a chat" : "message..."}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 disabled={disabled}
@@ -125,7 +125,7 @@ export default function MessageInput({ currentPeer, disabled }) {
                 type="submit"
                 className="icon-btn send-btn"
                 disabled={disabled || sending || !text.trim()}
-                title="Send"
+                title="send"
             >
                 {sending ? (
                     <div className="spinner-small" />

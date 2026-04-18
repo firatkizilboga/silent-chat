@@ -57,7 +57,7 @@
     --transition-slow: 350ms ease;
 
     /* Typography */
-    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-family: 'TASA Orbiter', sans-serif;
     --font-size-xs: 0.75rem;
     --font-size-sm: 0.875rem;
     --font-size-md: 1rem;
@@ -99,6 +99,11 @@ input,
 button {
     font-family: inherit;
     font-size: inherit;
+}
+
+input, textarea {
+    caret-color: var(--text-primary);
+    caret-shape: block;
 }
 
 /* ========================================
@@ -171,7 +176,11 @@ button {
 
 .login-header h1 {
     font-size: var(--font-size-2xl);
+    font-family: "Doto", sans-serif;
+    font-optical-sizing: auto;
     font-weight: 700;
+    font-style: normal;
+    font-variation-settings: "ROND" 0;
     background: var(--gradient-primary);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -290,23 +299,28 @@ button {
 
 .new-chat-section input {
     flex: 1;
-    padding: var(--space-md);
+    height: 48px;
+    padding: 0 var(--space-md);
     background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
+    border: 2px solid var(--border-color);
     border-radius: var(--radius-md);
     color: var(--text-primary);
     transition: var(--transition-fast);
 }
 
 .new-chat-btn {
-    padding: var(--space-sm) var(--space-md);
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    padding: 0;
     background: var(--accent-primary);
     color: var(--text-inverse);
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
-    font-weight: 600;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: var(--transition-fast);
 }
 
@@ -318,6 +332,7 @@ button {
 .new-chat-section input:focus {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
 }
 
 .new-chat-section input::placeholder {
@@ -370,19 +385,20 @@ button {
 .send-btn {
     width: 48px;
     height: 48px;
+    min-width: 48px;
+    min-height: 48px;
     padding: 0;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-md);
     border: none;
     cursor: pointer;
     transition: var(--transition-fast);
-    font-size: 1.25rem;
     flex-shrink: 0;
 }
 
 .attach-btn,
 .camera-btn {
     background: transparent;
-    border: 1px solid var(--border-color);
+    border: 2px solid var(--border-color);
     color: var(--text-secondary);
 }
 
@@ -399,7 +415,7 @@ button {
 }
 
 .send-btn:hover:not(:disabled) {
-    transform: scale(1.05);
+    opacity: 0.85;
 }
 
 .attach-btn:disabled,
@@ -588,11 +604,13 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
     cursor: pointer;
     transition: var(--transition-fast);
@@ -635,9 +653,13 @@ button {
     border-bottom: 1px solid var(--border-color);
 }
 
-.sidebar-header h2 {
-    font-size: var(--font-size-lg);
-    font-weight: 600;
+.sidebar-header h1 {
+    font-size: var(--font-size-2xl);
+    font-family: "Doto", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 700;
+    font-style: normal;
+    font-variation-settings: "ROND" 0;
     color: var(--accent-primary);
 }
 
@@ -762,13 +784,44 @@ button {
     background: rgba(247, 118, 142, 0.1);
 }
 
+
+
+.import-identity-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    margin-top: var(--space-sm);
+    padding: var(--space-xs) 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.import-identity-btn:hover {
+    color: var(--text-primary);
+}
+
+.export-identity-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: var(--space-xs);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    transition: var(--transition-fast);
+}
+
+.export-identity-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
 .icon-btn.attach-btn,
 .icon-btn.camera-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-full);
-    background: transparent;
-    border: 1px solid var(--border-color);
+    border: 2px solid var(--border-color);
     color: var(--text-secondary);
 }
 
@@ -780,16 +833,13 @@ button {
 }
 
 .icon-btn.send-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-full);
     background: var(--gradient-primary);
     color: var(--text-inverse);
     border: none;
 }
 
 .icon-btn.send-btn:hover:not(:disabled) {
-    transform: scale(1.05);
+    opacity: 0.85;
 }
 
 .icon-btn:disabled {
@@ -1022,15 +1072,16 @@ button {
 .message-form {
     display: flex;
     gap: var(--space-sm);
-    align-items: center;
+    align-items: stretch;
 }
 
 .message-form input {
     flex: 1;
-    padding: var(--space-md);
+    height: 48px;
+    padding: 0 var(--space-md);
     background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-full);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
     transition: var(--transition-fast);
 }
@@ -1038,6 +1089,7 @@ button {
 .message-form input:focus {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
 }
 
 .message-form input::placeholder {
@@ -1052,7 +1104,7 @@ button {
     width: 48px;
     height: 48px;
     padding: 0;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-md);
     background: var(--gradient-primary);
     border: none;
     color: var(--text-inverse);
@@ -1078,9 +1130,9 @@ button {
     width: 48px;
     height: 48px;
     padding: 0;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-md);
     background: transparent;
-    border: 1px solid var(--border-color);
+    border: 2px solid var(--border-color);
     color: var(--text-secondary);
     cursor: pointer;
     transition: var(--transition-fast);

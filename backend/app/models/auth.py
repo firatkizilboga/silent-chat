@@ -11,12 +11,14 @@ class ChallengeResponse(BaseModel):
 
 class RegisterCompleteRequest(BaseModel):
     alias: str
+    nonce: str
     publicKey: str
     signedNonce: str
 
 
 class LoginCompleteRequest(BaseModel):
     alias: str
+    nonce: str
     signedChallenge: str
 
 

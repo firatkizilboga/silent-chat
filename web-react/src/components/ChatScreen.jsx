@@ -9,7 +9,7 @@ import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 
 export default function ChatScreen() {
-    const { state, dispatch, logout } = useApp();
+    const { state, dispatch, logout, exportIdentity } = useApp();
     const [sidebarOpen, setSidebarOpen] = useState(true);
 
     const selectPeer = (peer) => {
@@ -36,6 +36,7 @@ export default function ChatScreen() {
                 onSelectPeer={selectPeer}
                 onCreateChat={createChat}
                 onLogout={logout}
+                onExportIdentity={exportIdentity}
             />
 
             <main className="chat-main">

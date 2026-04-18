@@ -70,6 +70,7 @@ export async function registerAndLogin(alias, setStatus) {
             method: 'POST',
             body: JSON.stringify({
                 alias,
+                nonce,
                 publicKey: publicKeyPem,
                 signedNonce
             }),
@@ -115,6 +116,7 @@ export async function registerAndLogin(alias, setStatus) {
             method: 'POST',
             body: JSON.stringify({
                 alias,
+                nonce,
                 publicKey: publicKeyPem,
                 signedNonce
             }),
@@ -141,7 +143,7 @@ export async function registerAndLogin(alias, setStatus) {
 
     const loginRes = await apiRequest('/auth/login-complete', {
         method: 'POST',
-        body: JSON.stringify({ alias, signedChallenge }),
+        body: JSON.stringify({ alias, nonce: challenge, signedChallenge }),
         noAuth: true
     });
 
@@ -149,6 +151,28 @@ export async function registerAndLogin(alias, setStatus) {
     const { token } = await loginRes.json();
 
     return { keyPair, publicKeyPem, token };
+}
+
+// ========================================
+// Token Refresh (uses in-memory keypair — no IDB needed)
+// ========================================
+export async function refreshToken(alias, keyPair) {
+    const chalRes = await apiRequest('/auth/login-challenge', {
+        method: 'POST',
+        body: JSON.stringify({ alias }),
+        noAuth: true
+    });
+    if (!chalRes.ok) throw new Error('Failed to get login challenge');
+    const { nonce } = await chalRes.json();
+    const signedChallenge = await signData(keyPair.signPrivateKey, nonce);
+    const loginRes = await apiRequest('/auth/login-complete', {
+        method: 'POST',
+        body: JSON.stringify({ alias, nonce, signedChallenge }),
+        noAuth: true
+    });
+    if (!loginRes.ok) throw new Error('Token refresh failed');
+    const { token } = await loginRes.json();
+    return token;
 }
 
 // ========================================
@@ -227,7 +251,7 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
     dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature });
 
-    await db.addMessage(messageObj);
+    await db.addMessage(messageObj, state?.atRestKey);
 
     return true;
 }
@@ -303,7 +327,7 @@ export async function sendFile(targetAlias, file, state, dispatch) {
     dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature });
 
-    await db.addMessage(messageObj);
+    await db.addMessage(messageObj, state?.atRestKey);
 
     return true;
 }
@@ -441,7 +465,7 @@ export async function pollMessages(state, dispatch, signal) {
                     }
 
                     dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
-                    await db.addMessage(messageObj);
+                    await db.addMessage(messageObj, state?.atRestKey);
                     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
                     updatedPeers.add(sender);
                 } catch (e) {
@@ -490,7 +514,7 @@ export async function pollMessages(state, dispatch, signal) {
                     };
 
                     dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
-                    await db.addMessage(messageObj);
+                    await db.addMessage(messageObj, state?.atRestKey);
                     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
                     updatedPeers.add(sender);
                     console.log('[Poll] File received from:', sender);
@@ -506,8 +530,6 @@ export async function pollMessages(state, dispatch, signal) {
             await db.setConfig('lastMessageId', maxId);
             console.log('[Poll] Updated watermark to id:', maxId);
         }
-
-        await db.setConfig('seenSignatures', Array.from(state.seenSignatures));
 
         return Array.from(updatedPeers);
     } catch (e) {
@@ -543,7 +565,7 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
                 msgId: msg.id
             };
             dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
-            await db.addMessage(messageObj);
+            await db.addMessage(messageObj, state?.atRestKey);
         } else {
             const text = await decryptMessage(session, msg.encryptedMessage);
             let messageObj = {
@@ -554,7 +576,7 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
                 msgId: msg.id
             };
             dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
-            await db.addMessage(messageObj);
+            await db.addMessage(messageObj, state?.atRestKey);
         }
     } catch (e) {
         console.error("[Process] Message failed:", e);
@@ -647,7 +669,7 @@ export async function handleIncomingMessage(msg, state, dispatch) {
                 msgId: msg.id
             };
             dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
-            await db.addMessage(messageObj);
+            await db.addMessage(messageObj, state?.atRestKey);
             dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
         } catch (e) {
             console.error("File processing failed:", e);

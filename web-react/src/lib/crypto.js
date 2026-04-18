@@ -173,3 +173,51 @@ export async function decryptMessage(aesKeyBytes, encryptedB64) {
 
     return new TextDecoder().decode(decrypted);
 }
+
+// ========================================
+// At-Rest Encryption (passphrase-based)
+// ========================================
+
+export function generateSalt() {
+    return arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(16)).buffer);
+}
+
+export async function deriveAtRestKey(passphrase, saltB64) {
+    const salt = base64ToArrayBuffer(saltB64);
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(passphrase),
+        'PBKDF2',
+        false,
+        ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+export async function encryptAtRest(cryptoKey, data) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(JSON.stringify(data));
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, encoded);
+    const combined = new Uint8Array(12 + ciphertext.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(ciphertext), 12);
+    return arrayBufferToBase64(combined.buffer);
+}
+
+export async function decryptAtRest(cryptoKey, encryptedB64) {
+    const combined = new Uint8Array(base64ToArrayBuffer(encryptedB64));
+    const iv = combined.slice(0, 12);
+    const ciphertext = combined.slice(12);
+    const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        ciphertext
+    );
+    return JSON.parse(new TextDecoder().decode(decrypted));
+}

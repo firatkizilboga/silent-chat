@@ -11,7 +11,8 @@ export default function Sidebar({
     messages,
     alias,
     onSelectPeer,
-    onCreateChat
+    onCreateChat,
+    onExportIdentity,
 }) {
     const [newChatInput, setNewChatInput] = useState('');
     const peers = Object.keys(messages);
@@ -33,7 +34,7 @@ export default function Sidebar({
     return (
         <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
             <div className="sidebar-header">
-                <h2>Silent Chat</h2>
+                <h1>silentchat</h1>
                 <button className="close-sidebar-btn" onClick={() => onSelectPeer(currentPeer)}>
                     ×
                 </button>
@@ -43,7 +44,7 @@ export default function Sidebar({
                 <input
                     type="text"
                     id="newChatInput"
-                    placeholder="New chat..."
+                    placeholder="new chat..."
                     value={newChatInput}
                     onChange={(e) => setNewChatInput(e.target.value)}
                     onKeyDown={handleNewChat}
@@ -61,7 +62,7 @@ export default function Sidebar({
 
             <div className="chat-list" id="chatList">
                 {sortedPeers.length === 0 ? (
-                    <div className="empty-chats">No conversations yet</div>
+                    <div className="empty-chats">no conversations yet</div>
                 ) : (
                     sortedPeers.map((peer) => {
                         const msgs = messages[peer] || [];
@@ -90,6 +91,24 @@ export default function Sidebar({
 
             <div className="sidebar-footer">
                 <span className="footer-user">@{alias}</span>
+                <button
+                    className="export-identity-btn"
+                    title="download identity backup"
+                    onClick={() => {
+                        const ok = window.confirm(
+                            'This file contains your private keys.\n\n' +
+                            'Anyone with this file and your passphrase can impersonate you.\n\n' +
+                            'Store it somewhere safe. Continue?'
+                        );
+                        if (ok) onExportIdentity();
+                    }}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                </button>
             </div>
         </aside>
     );
