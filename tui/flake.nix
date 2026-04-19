@@ -26,6 +26,7 @@
             curl
             sqlite
             nlohmann_json
+            ftxui
 
             # Development tools
             ccache
@@ -58,6 +59,7 @@
             curl
             sqlite
             nlohmann_json
+            ftxui
           ];
 
           cmakeFlags = [
