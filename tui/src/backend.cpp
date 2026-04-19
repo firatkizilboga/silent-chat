@@ -102,6 +102,7 @@ bool Backend::registerAndLogin(const std::string& alias) {
         auto regComplete = http_.post("/auth/register-complete", {
             {"alias", alias},
             {"publicKey", crypto_.getPublicKeyPEM()},
+            {"nonce", nonce},
             {"signedNonce", signedNonce}
         });
 
@@ -131,6 +132,7 @@ bool Backend::registerAndLogin(const std::string& alias) {
         auto regComplete = http_.post("/auth/register-complete", {
             {"alias", alias},
             {"publicKey", crypto_.getPublicKeyPEM()},
+            {"nonce", nonce},
             {"signedNonce", signedNonce}
         });
 
@@ -157,6 +159,7 @@ bool Backend::registerAndLogin(const std::string& alias) {
 
     auto loginComplete = http_.post("/auth/login-complete", {
         {"alias", alias},
+        {"nonce", challenge},
         {"signedChallenge", signedChallenge}
     });
 
