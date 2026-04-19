@@ -12,5 +12,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 nix build            # build a release package (creates ./result)
 ./result/bin/schatui # run the release binary
 
-nix profile install ./result  # install schatui globally
+nix profile add ./result  # install schatui globally
+
+nix profile remove schatui # remove schatui globally
 ```
