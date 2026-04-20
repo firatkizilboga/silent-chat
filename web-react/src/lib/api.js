@@ -21,9 +21,9 @@ import {
 import { db, saveKeys, loadKeys } from './storage.js';
 
 // ========================================
-// Base API Request with AbortController
+// Base API Request with AbortController and Auto-Refresh
 // ========================================
-export async function apiRequest(endpoint, options = {}, token = null, signal = null) {
+export async function apiRequest(endpoint, options = {}, token = null, signal = null, refreshContext = null) {
     const url = `${SERVER_URL}${endpoint}`;
     const headers = { 'Content-Type': 'application/json', ...options.headers };
 
@@ -36,8 +36,39 @@ export async function apiRequest(endpoint, options = {}, token = null, signal = 
         fetchOptions.signal = signal;
     }
 
-    const response = await fetch(url, fetchOptions);
+    let response = await fetch(url, fetchOptions);
+
+    // Auto-refresh logic
+    if (response.status === 401 && refreshContext && !options.noAuth && !options._isRetry) {
+        console.log(`[API] 401 on ${endpoint}, attempting refresh...`);
+        try {
+            const { alias, keyPair, dispatch } = refreshContext;
+            const newToken = await refreshToken(alias, keyPair);
+            
+            // Update global state
+            dispatch({ type: 'SET_TOKEN', token: newToken });
+
+            // Retry original request
+            const retryHeaders = { ...headers, 'Authorization': `Bearer ${newToken}` };
+            response = await fetch(url, { ...fetchOptions, headers: retryHeaders, _isRetry: true });
+        } catch (e) {
+            console.error('[API] Refresh and retry failed:', e);
+            // If refresh fails, let the original 401 stand or throw
+        }
+    }
+
     return response;
+}
+
+function buildRefreshContext(state, dispatch) {
+    if (!state || !dispatch || !state.alias || !state.keyPair) return null;
+    return { alias: state.alias, keyPair: state.keyPair, dispatch };
+}
+
+async function apiRequestWithState(endpoint, options = {}, state = null, dispatch = null, signal = null) {
+    const token = state?.token || null;
+    const refreshContext = buildRefreshContext(state, dispatch);
+    return apiRequest(endpoint, options, token, signal, refreshContext);
 }
 
 // ========================================
@@ -162,7 +193,8 @@ export async function refreshToken(alias, keyPair) {
         body: JSON.stringify({ alias }),
         noAuth: true
     });
-    if (!chalRes.ok) throw new Error('Failed to get login challenge');
+    if (!chalRes.ok) throw new Error(`Failed to get login challenge: ${chalRes.status}`);
+    
     const { nonce } = await chalRes.json();
     const signedChallenge = await signData(keyPair.signPrivateKey, nonce);
     const loginRes = await apiRequest('/auth/login-complete', {
@@ -170,7 +202,8 @@ export async function refreshToken(alias, keyPair) {
         body: JSON.stringify({ alias, nonce, signedChallenge }),
         noAuth: true
     });
-    if (!loginRes.ok) throw new Error('Token refresh failed');
+    
+    if (!loginRes.ok) throw new Error(`Token refresh failed: ${loginRes.status}`);
     const { token } = await loginRes.json();
     return token;
 }
@@ -178,11 +211,12 @@ export async function refreshToken(alias, keyPair) {
 // ========================================
 // Key Exchange
 // ========================================
-export async function fetchPeerKey(targetAlias, peerPublicKeys, token) {
+export async function fetchPeerKey(targetAlias, state, dispatch = null) {
+    const peerPublicKeys = state?.peerPublicKeys || {};
     if (peerPublicKeys[targetAlias]) return peerPublicKeys[targetAlias];
 
     try {
-        const res = await apiRequest(`/keys/${targetAlias}`, {}, token);
+        const res = await apiRequestWithState(`/keys/${targetAlias}`, {}, state, dispatch);
         if (!res.ok) return null;
 
         const { publicKey: pem } = await res.json();
@@ -203,7 +237,7 @@ export async function fetchPeerKey(targetAlias, peerPublicKeys, token) {
 export async function sendMessage(targetAlias, text, state, dispatch) {
     let peerKey = state.peerPublicKeys[targetAlias];
     if (!peerKey) {
-        peerKey = await fetchPeerKey(targetAlias, state.peerPublicKeys, state.token);
+        peerKey = await fetchPeerKey(targetAlias, state, dispatch);
         if (!peerKey) throw new Error("Could not fetch recipient's public key");
         dispatch({ type: 'SET_PEER_KEY', peer: targetAlias, key: peerKey });
     }
@@ -217,7 +251,7 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
         const encryptedKey = await encryptAesKey(peerKey.encrypt, aesKey);
         const keySig = await signData(state.keyPair.signPrivateKey, encryptedKey);
 
-        await apiRequest('/messages', {
+        await apiRequestWithState('/messages', {
             method: 'POST',
             body: JSON.stringify({
                 recipientAlias: targetAlias,
@@ -225,13 +259,13 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
                 encryptedMessage: encryptedKey,
                 signature: keySig
             })
-        }, state.token);
+        }, state, dispatch);
     }
 
     const encryptedMessage = await encryptMessage(session, text);
     const signature = await signData(state.keyPair.signPrivateKey, encryptedMessage);
 
-    await apiRequest('/messages', {
+    await apiRequestWithState('/messages', {
         method: 'POST',
         body: JSON.stringify({
             recipientAlias: targetAlias,
@@ -239,7 +273,7 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
             encryptedMessage,
             signature
         })
-    }, state.token);
+    }, state, dispatch);
 
     let messageObj = {
         peer: targetAlias,
@@ -262,7 +296,7 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
 export async function sendFile(targetAlias, file, state, dispatch) {
     let peerKey = state.peerPublicKeys[targetAlias];
     if (!peerKey) {
-        peerKey = await fetchPeerKey(targetAlias, state.peerPublicKeys, state.token);
+        peerKey = await fetchPeerKey(targetAlias, state, dispatch);
         if (!peerKey) throw new Error("Could not fetch recipient's public key");
         dispatch({ type: 'SET_PEER_KEY', peer: targetAlias, key: peerKey });
     }
@@ -276,7 +310,7 @@ export async function sendFile(targetAlias, file, state, dispatch) {
         const encryptedKey = await encryptAesKey(peerKey.encrypt, aesKey);
         const keySig = await signData(state.keyPair.signPrivateKey, encryptedKey);
 
-        await apiRequest('/messages', {
+        await apiRequestWithState('/messages', {
             method: 'POST',
             body: JSON.stringify({
                 recipientAlias: targetAlias,
@@ -284,7 +318,7 @@ export async function sendFile(targetAlias, file, state, dispatch) {
                 encryptedMessage: encryptedKey,
                 signature: keySig
             })
-        }, state.token);
+        }, state, dispatch);
     }
 
     // Read file as base64
@@ -306,7 +340,7 @@ export async function sendFile(targetAlias, file, state, dispatch) {
     const signature = await signData(state.keyPair.signPrivateKey, encryptedContent);
 
     // Send as FILE type - server will store separately
-    await apiRequest('/messages', {
+    await apiRequestWithState('/messages', {
         method: 'POST',
         body: JSON.stringify({
             recipientAlias: targetAlias,
@@ -314,7 +348,7 @@ export async function sendFile(targetAlias, file, state, dispatch) {
             encryptedMessage: encryptedContent,
             signature
         })
-    }, state.token);
+    }, state, dispatch);
 
     let messageObj = {
         peer: targetAlias,
@@ -351,7 +385,7 @@ export async function pollMessages(state, dispatch, signal) {
         }
 
         console.log('[Poll] Requesting messages since id:', since);
-        const res = await apiRequest(`/messages?since=${since}`, {}, state.token, signal);
+        const res = await apiRequestWithState(`/messages?since=${since}`, {}, state, dispatch, signal);
         if (res.status === 401) {
             console.log('[Poll] Token expired (401)');
             throw new Error("AUTH_EXPIRED");
@@ -391,7 +425,7 @@ export async function pollMessages(state, dispatch, signal) {
             // Fetch sender's key if needed
             let peerKey = state.peerPublicKeys[sender];
             if (!peerKey) {
-                peerKey = await fetchPeerKey(sender, state.peerPublicKeys, state.token);
+                peerKey = await fetchPeerKey(sender, state, dispatch);
                 if (!peerKey) {
                     console.log('[Poll] Could not fetch key for:', sender, '- aborting batch');
                     break;
@@ -486,7 +520,7 @@ export async function pollMessages(state, dispatch, signal) {
                     console.log('[Poll] Fetching file:', fileId);
 
                     // Fetch the actual encrypted content
-                    const fileRes = await apiRequest(`/files/${fileId}`, {}, state.token, signal);
+                    const fileRes = await apiRequestWithState(`/files/${fileId}`, {}, state, dispatch, signal);
                     if (!fileRes.ok) {
                         console.error('[Poll] Failed to fetch file:', fileId);
                         continue;
@@ -550,7 +584,7 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
     try {
         if (msg.type === 'FILE') {
             const { fileId } = JSON.parse(msg.encryptedMessage);
-            const fileRes = await apiRequest(`/files/${fileId}`, {}, state.token);
+            const fileRes = await apiRequestWithState(`/files/${fileId}`, {}, state, dispatch);
             if (!fileRes.ok) return;
             const { encryptedContent } = await fileRes.json();
             const decrypted = await decryptMessage(session, encryptedContent);
@@ -585,6 +619,9 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
 
 // Shared message handler for WebSocket and Polling
 export async function handleIncomingMessage(msg, state, dispatch) {
+    // Ignore server acknowledgments for commands
+    if (msg.cmd) return;
+
     if (msg.type === 'online_status') {
         dispatch({ type: 'SET_ONLINE_STATUS', peer: msg.user, status: msg.status });
         return;
@@ -606,7 +643,7 @@ export async function handleIncomingMessage(msg, state, dispatch) {
 
     let peerKey = state.peerPublicKeys[sender];
     if (!peerKey) {
-        peerKey = await fetchPeerKey(sender, state.peerPublicKeys, state.token);
+        peerKey = await fetchPeerKey(sender, state, dispatch);
         if (!peerKey) {
             console.log('[MSG] Could not fetch key for:', sender);
             return;
@@ -652,7 +689,7 @@ export async function handleIncomingMessage(msg, state, dispatch) {
 
         try {
             const { fileId } = JSON.parse(msg.encryptedMessage);
-            const fileRes = await apiRequest(`/files/${fileId}`, {}, state.token);
+            const fileRes = await apiRequestWithState(`/files/${fileId}`, {}, state, dispatch);
             if (!fileRes.ok) return;
 
             const { encryptedContent } = await fileRes.json();
@@ -730,4 +767,3 @@ export function sendWebSocketCommand(ws, cmd, args = {}) {
 export function sendWebSocketPing(ws) {
     sendWebSocketCommand(ws, 'ping');
 }
-

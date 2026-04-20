@@ -32,7 +32,7 @@ export default function ChatScreen() {
 
         try {
             // Verify if user exists by trying to get their public key
-            const key = await fetchPeerKey(peer, state.peerPublicKeys, state.token);
+            const key = await fetchPeerKey(peer, state, dispatch);
             if (!key) {
                 alert(`User @${peer} not found on the server.`);
                 return;

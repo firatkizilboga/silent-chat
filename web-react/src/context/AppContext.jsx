@@ -515,6 +515,23 @@ export function AppProvider({ children }) {
         let currentAbort = null;
         let reconnectTimeout = null;
 
+        const refreshSessionOrLogout = async (scope, loginError = null) => {
+            try {
+                const { alias, keyPair } = stateRef.current;
+                const token = await refreshToken(alias, keyPair);
+                if (!isMounted) return false;
+                dispatch({ type: 'SET_TOKEN', token });
+                return true;
+            } catch (refreshErr) {
+                console.error(`[${scope}] Token refresh failed:`, refreshErr);
+                await logout();
+                if (loginError) {
+                    dispatch({ type: 'LOGIN_ERROR', error: loginError });
+                }
+                return false;
+            }
+        };
+
         const startPolling = () => {
             if (pollInterval) return;
             console.log('[Conn] Falling back to polling');
@@ -528,15 +545,7 @@ export function AppProvider({ children }) {
                     if (e.message === 'AUTH_EXPIRED') {
                         console.log('[Conn] Session expired, refreshing token...');
                         stopPolling();
-                        try {
-                            const { alias, keyPair } = stateRef.current;
-                            const token = await refreshToken(alias, keyPair);
-                            dispatch({ type: 'SET_TOKEN', token });
-                        } catch (loginErr) {
-                            console.error('[Conn] Token refresh failed:', loginErr);
-                            await logout();
-                            dispatch({ type: 'LOGIN_ERROR', error: 'Session expired. Please sign in again.' });
-                        }
+                        await refreshSessionOrLogout('Conn', 'Session expired. Please sign in again.');
                     } else if (e.name !== 'AbortError' && isMounted) {
                         console.error('Poll error:', e);
                     }
@@ -585,9 +594,17 @@ export function AppProvider({ children }) {
                 dispatch({ type: 'SET_WS_CONNECTED', connected: true });
                 wsRef.current = ws;
                 stopPolling();
+                
                 const syncAbort = new AbortController();
                 pollMessages(stateRef.current, dispatch, syncAbort.signal)
-                    .catch(e => console.error('[Sync] Failed:', e));
+                    .catch(async (e) => {
+                        if (e.message === 'AUTH_EXPIRED' && isMounted) {
+                            console.log('[Sync] Token expired during sync, refreshing...');
+                            await refreshSessionOrLogout('Sync');
+                        } else {
+                            console.error('[Sync] Failed:', e);
+                        }
+                    });
                 startPing();
             };
         };
