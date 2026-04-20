@@ -56,6 +56,7 @@ def registered_user(client: TestClient):
         "/auth/register-complete",
         json={
             "alias": alias,
+            "nonce": nonce.decode('utf-8'),
             "publicKey": serialize_public_key(public_key),
             "signedNonce": base64.b64encode(signature).decode('utf-8'),
         }
@@ -96,6 +97,7 @@ def test_full_registration_flow(client: TestClient):
         "/auth/register-complete",
         json={
             "alias": alias,
+            "nonce": nonce.decode('utf-8'),
             "publicKey": public_key_pem,
             "signedNonce": base64.b64encode(signature).decode('utf-8'),
         }
@@ -124,6 +126,7 @@ def test_login_flow(client: TestClient, registered_user):
         "/auth/login-complete",
         json={
             "alias": alias,
+            "nonce": challenge.decode('utf-8'),
             "signedChallenge": base64.b64encode(signed_challenge).decode('utf-8')
         }
     )
@@ -148,6 +151,7 @@ def test_register_with_bad_signature(client: TestClient):
         "/auth/register-complete",
         json={
             "alias": alias,
+            "nonce": response.json()["nonce"],
             "publicKey": serialize_public_key(public_key),
             "signedNonce": bad_signature,
         }
@@ -161,6 +165,7 @@ def test_login_with_bad_signature(client: TestClient, registered_user):
     # Get a real login challenge
     response = client.post("/auth/login-challenge", json={"alias": alias})
     assert response.status_code == 200
+    nonce = response.json()["nonce"]
 
     # Send a garbage signature
     bad_signature = base64.b64encode(b"this is not a valid signature").decode('utf-8')
@@ -169,6 +174,7 @@ def test_login_with_bad_signature(client: TestClient, registered_user):
         "/auth/login-complete",
         json={
             "alias": alias,
+            "nonce": nonce,
             "signedChallenge": bad_signature
         }
     )

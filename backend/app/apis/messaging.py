@@ -71,6 +71,60 @@ async def post_message(message: Message, sender_alias: str = Depends(get_current
     return {"message": "Message accepted"}
 
 
+handlers = {}
+
+
+def ws_task_handler(cmd: str):
+    """
+    Decorator factory to register a WebSocket command handler.
+    Usage: @ws_task_handler("my_command")
+    """
+
+    def decorator(func):
+        handlers[cmd] = func
+        return func
+
+    return decorator
+
+
+@ws_task_handler("subscribe-to-online-status")
+async def sub_to_online_stat(user_alias, arguments):
+    success = await manager.subscribe_to_online_status(user_alias, arguments.get("target_user"))
+    return {"status": "subscribed" if success else "limit_reached"}
+
+
+@ws_task_handler("unsubscribe-from-online-status")
+async def unsub_from_online_stat(user_alias, arguments):
+    await manager.unsubscribe_from_online_status(user_alias, arguments.get("target_user"))
+    return {"status": "unsubscribed"}
+
+
+async def handle_ws_task(user_alias: str, data: str):
+    """
+    Parses the incoming WS data and routes it to the registered handler.
+    """
+    try:
+        body = json.loads(data)
+        cmd = body.get("cmd")
+        handler = handlers.get(cmd)
+
+        if not handler:
+            return json.dumps({"error": f"Unknown command: {cmd}"})
+
+        if asyncio.iscoroutinefunction(handler):
+            result = await handler(user_alias, body.get("arguments", {}))
+        else:
+            result = handler(user_alias, body.get("arguments", {}))
+
+        return json.dumps({"cmd": cmd, "payload": result})
+
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Invalid JSON format"})
+    except Exception as e:
+        logger.error(f"WebSocket task error: {e}")
+        return json.dumps({"error": "Internal server error"})
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     """
@@ -91,17 +145,18 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
         return
 
     await manager.connect(websocket, user_alias)
+
     try:
         while True:
             data = await websocket.receive_text()
-            if data == "ping":
-                await websocket.send_text("pong")
+            response = await handle_ws_task(user_alias, data)
+            await websocket.send_text(response)
 
     except WebSocketDisconnect:
-        manager.disconnect(websocket, user_alias)
+        await manager.disconnect(websocket, user_alias)
     except Exception as e:
         logger.error(f"WebSocket error for {user_alias}: {e}")
-        manager.disconnect(websocket, user_alias)
+        await manager.disconnect(websocket, user_alias)
 
 
 @router.get("/messages")
