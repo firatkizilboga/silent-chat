@@ -53,6 +53,7 @@ const initialState = {
 function getMessageKey(message) {
     if (message?.msgId !== undefined && message?.msgId !== null) return `msg:${message.msgId}`;
     if (message?.id !== undefined && message?.id !== null) return `id:${message.id}`;
+    if (message?.clientMsgId) return `client:${message.clientMsgId}`;
 
     const attachmentKey = message?.attachment ? JSON.stringify(message.attachment) : '';
     return [
@@ -192,6 +193,9 @@ function appReducer(state, action) {
         case 'ADD_MESSAGE': {
             const peerMsgs = state.messages[action.peer] || [];
             if (action.message.msgId && peerMsgs.some(m => m.msgId === action.message.msgId)) {
+                return state;
+            }
+            if (action.message.clientMsgId && peerMsgs.some(m => m.clientMsgId === action.message.clientMsgId)) {
                 return state;
             }
             // Mark peer as unread if it's not the currently selected peer

@@ -19,6 +19,7 @@ import {
     decryptMessage
 } from './crypto.js';
 import { db, saveKeys, loadKeys, getPinnedPeerKeyFingerprint, pinPeerKeyFingerprint } from './storage.js';
+const SELF_SYNC_TYPE = 'SELF_SYNC';
 
 // ========================================
 // Base API Request with AbortController and Auto-Refresh
@@ -95,6 +96,11 @@ async function validateAndPinPeerKey(alias, pem, atRestKey = null) {
         error.received = fingerprint;
         throw error;
     }
+}
+
+function generateClientMsgId() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 // ========================================
@@ -262,10 +268,58 @@ export async function fetchPeerKey(targetAlias, state, dispatch = null) {
     }
 }
 
+async function ensureSelfSyncSession(state, dispatch) {
+    let session = state.activeSessions[state.alias];
+    if (session) return session;
+
+    let selfKey = state.peerPublicKeys[state.alias];
+    if (!selfKey) {
+        selfKey = await fetchPeerKey(state.alias, state, dispatch);
+        if (!selfKey) throw new Error("Could not fetch your public key for self-sync");
+        dispatch({ type: 'SET_PEER_KEY', peer: state.alias, key: selfKey });
+    }
+
+    const aesKey = await generateAesKey();
+    dispatch({ type: 'SET_SESSION', peer: state.alias, key: aesKey });
+
+    const encryptedKey = await encryptAesKey(selfKey.encrypt, aesKey);
+    const keySig = await signData(state.keyPair.signPrivateKey, encryptedKey);
+
+    await apiRequestWithState('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+            recipientAlias: state.alias,
+            type: 'KEY_EXCHANGE',
+            encryptedMessage: encryptedKey,
+            signature: keySig
+        })
+    }, state, dispatch);
+
+    return aesKey;
+}
+
+async function sendSelfSyncCopy(state, dispatch, payload) {
+    const session = await ensureSelfSyncSession(state, dispatch);
+    const encryptedPayload = await encryptMessage(session, JSON.stringify(payload));
+    const signature = await signData(state.keyPair.signPrivateKey, encryptedPayload);
+
+    await apiRequestWithState('/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+            recipientAlias: state.alias,
+            type: SELF_SYNC_TYPE,
+            encryptedMessage: encryptedPayload,
+            signature
+        })
+    }, state, dispatch);
+}
+
 // ========================================
 // Message Sending (TEXT)
 // ========================================
 export async function sendMessage(targetAlias, text, state, dispatch) {
+    const clientMsgId = generateClientMsgId();
+
     let peerKey = state.peerPublicKeys[targetAlias];
     if (!peerKey) {
         peerKey = await fetchPeerKey(targetAlias, state, dispatch);
@@ -310,13 +364,26 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
         peer: targetAlias,
         sender: 'Me',
         text,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        clientMsgId
     };
 
     dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature });
 
     await db.addMessage(messageObj, state?.atRestKey);
+
+    try {
+        await sendSelfSyncCopy(state, dispatch, {
+            kind: 'TEXT',
+            targetAlias,
+            text,
+            timestamp: messageObj.timestamp,
+            clientMsgId
+        });
+    } catch (e) {
+        console.error('[Sync] Failed to send self-copy:', e);
+    }
 
     return true;
 }
@@ -325,6 +392,8 @@ export async function sendMessage(targetAlias, text, state, dispatch) {
 // File Sending (FILE type)
 // ========================================
 export async function sendFile(targetAlias, file, state, dispatch) {
+    const clientMsgId = generateClientMsgId();
+
     let peerKey = state.peerPublicKeys[targetAlias];
     if (!peerKey) {
         peerKey = await fetchPeerKey(targetAlias, state, dispatch);
@@ -386,13 +455,26 @@ export async function sendFile(targetAlias, file, state, dispatch) {
         sender: 'Me',
         text: '',
         attachment,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        clientMsgId
     };
 
     dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature });
 
     await db.addMessage(messageObj, state?.atRestKey);
+
+    try {
+        await sendSelfSyncCopy(state, dispatch, {
+            kind: 'FILE',
+            targetAlias,
+            attachment,
+            timestamp: messageObj.timestamp,
+            clientMsgId
+        });
+    } catch (e) {
+        console.error('[Sync] Failed to send file self-copy:', e);
+    }
 
     return true;
 }
@@ -442,7 +524,7 @@ export async function pollMessages(state, dispatch, signal) {
             }
 
             const sender = msg.senderAlias || 'Unknown';
-            if (sender === state.alias) {
+            if (sender === state.alias && msg.type !== 'KEY_EXCHANGE' && msg.type !== SELF_SYNC_TYPE) {
                 dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
                 continue;
             }
@@ -479,8 +561,10 @@ export async function pollMessages(state, dispatch, signal) {
                     const aesKey = await decryptAesKey(state.keyPair.encryptPrivateKey, msg.encryptedMessage);
                     dispatch({ type: 'SET_SESSION', peer: sender, key: aesKey });
                     dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
-                    dispatch({ type: 'INIT_PEER', peer: sender });
-                    updatedPeers.add(sender);
+                    if (sender !== state.alias) {
+                        dispatch({ type: 'INIT_PEER', peer: sender });
+                        updatedPeers.add(sender);
+                    }
                     console.log('[Poll] Key exchange successful with:', sender);
 
                     // Process pending messages
@@ -488,10 +572,11 @@ export async function pollMessages(state, dispatch, signal) {
                     if (pending && pending.length > 0) {
                         console.log(`[Pending] Processing ${pending.length} messages for ${sender}`);
                         for (const pendingMsg of pending) {
-                            await processTextOrFileMessage(pendingMsg, sender, aesKey, dispatch, state);
+                            const processedPeer = await processTextOrFileMessage(pendingMsg, sender, aesKey, dispatch, state);
+                            if (processedPeer) updatedPeers.add(processedPeer);
                         }
                         dispatch({ type: 'CLEAR_PENDING', peer: sender });
-                        updatedPeers.add(sender);
+                        if (sender !== state.alias) updatedPeers.add(sender);
                     }
                 } catch (e) {
                     console.error("Key exchange failed:", e);
@@ -536,6 +621,18 @@ export async function pollMessages(state, dispatch, signal) {
                 } catch (e) {
                     console.error("Decryption failed:", e);
                 }
+            } else if (msg.type === SELF_SYNC_TYPE) {
+                const session = state.activeSessions[sender];
+                if (!session) {
+                    console.log('[Poll] No self session for sync copy, queueing');
+                    dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
+                    dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
+                    continue;
+                }
+
+                const processedPeer = await processTextOrFileMessage(msg, sender, session, dispatch, state);
+                if (processedPeer) updatedPeers.add(processedPeer);
+                dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: sig });
             } else if (msg.type === 'FILE') {
                 const session = state.activeSessions[sender];
                 if (!session) {
@@ -613,7 +710,31 @@ export async function pollMessages(state, dispatch, signal) {
 // Helper to process TEXT/FILE messages (used for pending queue too)
 export async function processTextOrFileMessage(msg, sender, session, dispatch, state) {
     try {
-        if (msg.type === 'FILE') {
+        if (msg.type === SELF_SYNC_TYPE) {
+            const decrypted = await decryptMessage(session, msg.encryptedMessage);
+            const payload = JSON.parse(decrypted);
+            const targetAlias = payload?.targetAlias;
+
+            if (!targetAlias || !payload?.kind) {
+                console.error('[Sync] Invalid self-copy payload');
+                return null;
+            }
+
+            const messageObj = {
+                peer: targetAlias,
+                sender: 'Me',
+                text: payload.kind === 'TEXT' ? (payload.text || '') : '',
+                attachment: payload.kind === 'FILE' ? payload.attachment : undefined,
+                timestamp: payload.timestamp || msg.timestamp || Date.now(),
+                msgId: msg.id,
+                clientMsgId: payload.clientMsgId || null
+            };
+
+            dispatch({ type: 'INIT_PEER', peer: targetAlias });
+            dispatch({ type: 'ADD_MESSAGE', peer: targetAlias, message: messageObj });
+            await db.addMessage(messageObj, state?.atRestKey);
+            return targetAlias;
+        } else if (msg.type === 'FILE') {
             const { fileId } = JSON.parse(msg.encryptedMessage);
             const fileRes = await apiRequestWithState(`/files/${fileId}`, {}, state, dispatch);
             if (!fileRes.ok) return;
@@ -631,6 +752,7 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
             };
             dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
             await db.addMessage(messageObj, state?.atRestKey);
+            return sender;
         } else {
             const text = await decryptMessage(session, msg.encryptedMessage);
             let messageObj = {
@@ -642,9 +764,11 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
             };
             dispatch({ type: 'ADD_MESSAGE', peer: sender, message: messageObj });
             await db.addMessage(messageObj, state?.atRestKey);
+            return sender;
         }
     } catch (e) {
         console.error("[Process] Message failed:", e);
+        return null;
     }
 }
 
@@ -661,7 +785,7 @@ export async function handleIncomingMessage(msg, state, dispatch) {
     if (state.seenSignatures.has(msg.signature)) return;
 
     const sender = msg.senderAlias || 'Unknown';
-    if (sender === state.alias) {
+    if (sender === state.alias && msg.type !== 'KEY_EXCHANGE' && msg.type !== SELF_SYNC_TYPE) {
         dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
         return;
     }
@@ -696,12 +820,23 @@ export async function handleIncomingMessage(msg, state, dispatch) {
             const aesKey = await decryptAesKey(state.keyPair.encryptPrivateKey, msg.encryptedMessage);
             dispatch({ type: 'SET_SESSION', peer: sender, key: aesKey });
             dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
-            dispatch({ type: 'INIT_PEER', peer: sender });
+            if (sender !== state.alias) {
+                dispatch({ type: 'INIT_PEER', peer: sender });
+            }
             // Pending messages will be handled by AppContext useEffect
         } catch (e) {
             console.error("Key exchange failed:", e);
         }
     } else if (msg.type === 'TEXT') {
+        const session = state.activeSessions[sender];
+        if (!session) {
+            dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
+            dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+            return;
+        }
+        await processTextOrFileMessage(msg, sender, session, dispatch, state);
+        dispatch({ type: 'ADD_SEEN_SIGNATURE', signature: msg.signature });
+    } else if (msg.type === SELF_SYNC_TYPE) {
         const session = state.activeSessions[sender];
         if (!session) {
             dispatch({ type: 'ADD_PENDING', peer: sender, message: msg });
