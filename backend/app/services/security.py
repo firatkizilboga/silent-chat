@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, UTC
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -18,6 +19,20 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 
+def get_user_from_token(token: str) -> Optional[str]:
+    """
+    Decodes JWT, validates it, and returns the user's alias (from 'sub' claim).
+    Returns None if token is invalid or user is not found in claims.
+    """
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        return payload.get("sub")
+    except JWTError:
+        return None
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """
     Decodes JWT, validates it, and returns the user's alias (from 'sub' claim).
@@ -28,14 +43,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        alias: str = payload.get("sub")
-        if alias is None:
-            raise credentials_exception
-    except JWTError:
+
+    alias = get_user_from_token(token)
+    if alias is None:
         raise credentials_exception
 
     # In a real app, you would fetch the user from the database here to ensure they still exist.

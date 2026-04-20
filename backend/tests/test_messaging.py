@@ -13,6 +13,7 @@ def registered_alice(client: TestClient):
     sig = sign_message(private_key, nonce)
     client.post("/auth/register-complete", json={
         "alias": alias,
+        "nonce": nonce.decode('utf-8'),
         "publicKey": serialize_public_key(public_key),
         "signedNonce": base64.b64encode(sig).decode('utf-8')
     })
@@ -28,6 +29,7 @@ def registered_bob(client: TestClient):
     sig = sign_message(private_key, nonce)
     client.post("/auth/register-complete", json={
         "alias": alias,
+        "nonce": nonce.decode('utf-8'),
         "publicKey": serialize_public_key(public_key),
         "signedNonce": base64.b64encode(sig).decode('utf-8')
     })
@@ -43,6 +45,7 @@ def get_jwt_for_user(client: TestClient, user_details):
     # Complete login
     resp = client.post("/auth/login-complete", json={
         "alias": user_details["alias"],
+        "nonce": nonce.decode('utf-8'),
         "signedChallenge": base64.b64encode(sig).decode('utf-8')
     })
     return resp.json()["token"]
@@ -256,9 +259,11 @@ def test_retrieve_file_unauthorized(client: TestClient, registered_alice, regist
     sig = sign_message(private_key, nonce)
     client.post("/auth/register-complete", json={
         "alias": charlie_alias,
+        "nonce": nonce.decode('utf-8'),
         "publicKey": serialize_public_key(public_key),
         "signedNonce": base64.b64encode(sig).decode('utf-8')
     })
+
     charlie_details = {"private_key": private_key, "public_key": public_key, "alias": charlie_alias}
     
     alice_token = get_jwt_for_user(client, registered_alice)

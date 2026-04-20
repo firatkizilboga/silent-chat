@@ -14,9 +14,8 @@ import json
 from typing import Optional
 from pydantic import BaseModel
 import logging
-from jose import JWTError, jwt
 
-from app.services.security import get_current_user
+from app.services.security import get_current_user, get_user_from_token
 from app.db import db
 from app.services.websockets import manager
 from app.core.config import settings
@@ -131,16 +130,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     WebSocket endpoint for real-time message updates.
     Expects a JWT token as a query parameter: ws://.../ws?token=...
     """
-    try:
-        # TODO: Extract the function here
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        user_alias: str = payload.get("sub")
-        if user_alias is None:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-    except JWTError:
+    user_alias = get_user_from_token(token)
+    if user_alias is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
