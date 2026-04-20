@@ -44,7 +44,11 @@ export default function ChatScreen() {
             setSidebarOpen(false);
         } catch (e) {
             console.error('[Chat] Failed to start chat:', e);
-            alert('Failed to start chat. Please check your connection.');
+            if (e?.code === 'KEY_PIN_MISMATCH') {
+                alert(e.message);
+            } else {
+                alert('Failed to start chat. Please check your connection.');
+            }
         }
     };
 

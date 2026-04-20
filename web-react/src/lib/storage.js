@@ -8,6 +8,7 @@ import { exportPublicKeyPem, encryptAtRest, decryptAtRest } from './crypto.js';
 
 const DB_NAME = 'SilentChatDB';
 const DB_VERSION = 2;
+const PEER_KEY_PINS_KEY = 'peerKeyPins';
 
 class StorageService {
     constructor() {
@@ -172,7 +173,7 @@ class StorageService {
                 const cursor = event.target.result;
                 if (cursor) {
                     const key = cursor.key;
-                    if (!key.startsWith('keys_') && key !== 'sessionKeys' && key !== 'atRestSalt') {
+                    if (!key.startsWith('keys_') && key !== 'sessionKeys' && key !== 'atRestSalt' && key !== PEER_KEY_PINS_KEY) {
                         cursor.delete();
                     }
                     cursor.continue();
@@ -262,6 +263,48 @@ export async function loadSessionKeys(atRestKey) {
         console.error('[Storage] Failed to load session keys:', e);
         return {};
     }
+}
+
+async function readPeerKeyPins(atRestKey) {
+    const stored = await db.getConfig(PEER_KEY_PINS_KEY);
+    if (!stored) return {};
+
+    try {
+        if (atRestKey && stored.encrypted) {
+            return await decryptAtRest(atRestKey, stored.encrypted);
+        }
+        if (!stored.encrypted) {
+            return stored;
+        }
+        return {};
+    } catch (e) {
+        console.error('[Storage] Failed to load peer key pins:', e);
+        return {};
+    }
+}
+
+async function writePeerKeyPins(pins, atRestKey) {
+    if (atRestKey) {
+        const encrypted = await encryptAtRest(atRestKey, pins);
+        await db.setConfig(PEER_KEY_PINS_KEY, { encrypted });
+        return;
+    }
+    await db.setConfig(PEER_KEY_PINS_KEY, pins);
+}
+
+export async function getPinnedPeerKeyFingerprint(peer, atRestKey) {
+    const pins = await readPeerKeyPins(atRestKey);
+    return pins?.[peer]?.fingerprint || null;
+}
+
+export async function pinPeerKeyFingerprint(peer, fingerprint, atRestKey) {
+    if (!peer || !fingerprint) return;
+    const pins = await readPeerKeyPins(atRestKey);
+    pins[peer] = {
+        fingerprint,
+        pinnedAt: pins[peer]?.pinnedAt || Date.now()
+    };
+    await writePeerKeyPins(pins, atRestKey);
 }
 
 // ========================================

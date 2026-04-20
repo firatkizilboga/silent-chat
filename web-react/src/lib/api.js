@@ -5,7 +5,7 @@
  */
 
 import { SERVER_URL } from './config.js';
-import { showNotification } from './utils.js';
+import { showNotification, pemToArrayBuffer, arrayBufferToBase64 } from './utils.js';
 import {
     generateKeyPair,
     exportPublicKeyPem,
@@ -18,7 +18,7 @@ import {
     encryptMessage,
     decryptMessage
 } from './crypto.js';
-import { db, saveKeys, loadKeys } from './storage.js';
+import { db, saveKeys, loadKeys, getPinnedPeerKeyFingerprint, pinPeerKeyFingerprint } from './storage.js';
 
 // ========================================
 // Base API Request with AbortController and Auto-Refresh
@@ -69,6 +69,32 @@ async function apiRequestWithState(endpoint, options = {}, state = null, dispatc
     const token = state?.token || null;
     const refreshContext = buildRefreshContext(state, dispatch);
     return apiRequest(endpoint, options, token, signal, refreshContext);
+}
+
+async function getPublicKeyFingerprint(pem) {
+    const spki = pemToArrayBuffer(pem);
+    const digest = await crypto.subtle.digest('SHA-256', spki);
+    return arrayBufferToBase64(digest);
+}
+
+async function validateAndPinPeerKey(alias, pem, atRestKey = null) {
+    const fingerprint = await getPublicKeyFingerprint(pem);
+    const pinnedFingerprint = await getPinnedPeerKeyFingerprint(alias, atRestKey);
+
+    if (!pinnedFingerprint) {
+        await pinPeerKeyFingerprint(alias, fingerprint, atRestKey);
+        console.log(`[KeyPin] Pinned public key for @${alias}`);
+        return;
+    }
+
+    if (pinnedFingerprint !== fingerprint) {
+        const error = new Error(`Security warning: @${alias}'s public key changed. Messages were blocked.`);
+        error.code = 'KEY_PIN_MISMATCH';
+        error.peer = alias;
+        error.expected = pinnedFingerprint;
+        error.received = fingerprint;
+        throw error;
+    }
 }
 
 // ========================================
@@ -220,12 +246,17 @@ export async function fetchPeerKey(targetAlias, state, dispatch = null) {
         if (!res.ok) return null;
 
         const { publicKey: pem } = await res.json();
+        await validateAndPinPeerKey(targetAlias, pem, state?.atRestKey);
 
         return {
             encrypt: await importPeerPublicKey(pem, true),
             verify: await importPeerPublicKey(pem, false)
         };
     } catch (e) {
+        if (e?.code === 'KEY_PIN_MISMATCH') {
+            console.error('[KeyPin] Key mismatch detected:', e);
+            throw e;
+        }
         console.error("Failed to fetch peer key:", e);
         return null;
     }

@@ -574,7 +574,16 @@ export function AppProvider({ children }) {
             if (!isMounted) return;
             ws = connectWebSocket(
                 state.token,
-                (msg) => handleIncomingMessage(msg, stateRef.current, dispatch),
+                (msg) => {
+                    handleIncomingMessage(msg, stateRef.current, dispatch)
+                        .catch((e) => {
+                            if (e?.code === 'KEY_PIN_MISMATCH') {
+                                console.error('[KeyPin] Incoming message blocked:', e.message);
+                                return;
+                            }
+                            console.error('[WS] Message handling failed:', e);
+                        });
+                },
                 () => {},
                 () => {
                     if (!isMounted) return;
