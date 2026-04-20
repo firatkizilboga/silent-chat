@@ -7,21 +7,44 @@ import { useApp } from '../context/AppContext.jsx';
 import Sidebar from './Sidebar';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
+import { fetchPeerKey } from '../lib/api.js';
 
 export default function ChatScreen() {
     const { state, dispatch, logout, exportIdentity, loadOlderMessages } = useApp();
     const [sidebarOpen, setSidebarOpen] = useState(true);
+
+    const peerStatus = state.currentPeer ? state.onlineStatus[state.currentPeer] : null;
 
     const selectPeer = (peer) => {
         dispatch({ type: 'SELECT_PEER', peer });
         setSidebarOpen(false);
     };
 
-    const createChat = (peer) => {
-        if (peer && peer !== state.alias) {
+    const createChat = async (peer) => {
+        if (!peer || peer === state.alias) return;
+
+        // If user already exists in our list, just select it
+        if (state.messages[peer]) {
+            dispatch({ type: 'SELECT_PEER', peer });
+            setSidebarOpen(false);
+            return;
+        }
+
+        try {
+            // Verify if user exists by trying to get their public key
+            const key = await fetchPeerKey(peer, state.peerPublicKeys, state.token);
+            if (!key) {
+                alert(`User @${peer} not found on the server.`);
+                return;
+            }
+
+            dispatch({ type: 'SET_PEER_KEY', peer, key });
             dispatch({ type: 'INIT_PEER', peer });
             dispatch({ type: 'SELECT_PEER', peer });
             setSidebarOpen(false);
+        } catch (e) {
+            console.error('[Chat] Failed to start chat:', e);
+            alert('Failed to start chat. Please check your connection.');
         }
     };
 
@@ -51,15 +74,9 @@ export default function ChatScreen() {
                         ☰
                     </button>
                     <div className="chat-header-info">
-                        <h2 id="chatPeerName">
+                        <h2 id="chatPeerName" className={peerStatus?.toLowerCase() || 'unknown'}>
                             {state.currentPeer ? `@${state.currentPeer}` : 'Select a chat'}
                         </h2>
-                        <span id="chatStatus">
-                            {state.currentPeer ? 'End-to-End Encrypted' : ''}
-                        </span>
-                    </div>
-                    <div className="connection-indicator" id="connectionIndicator" title="Connected">
-                        <span className="indicator-dot"></span>
                     </div>
                 </header>
 
