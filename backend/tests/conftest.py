@@ -6,7 +6,11 @@ import asyncio
 
 @pytest.fixture(scope="function")
 def client():
-    # Truncate all tables before each test
-    asyncio.run(db.truncate())
+    # Initialize and truncate all tables before each test
+    async def setup_db():
+        await db.init_db()
+        await db.truncate()
+    
+    asyncio.run(setup_db())
     with TestClient(app) as c:
         yield c
