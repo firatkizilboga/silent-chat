@@ -28,6 +28,9 @@ build/
 .DS_Store
 Thumbs.db
 
+# TUI
+tui/result
+
 # Keys and Certs (Safety first!)
 *.pem
 *.key
@@ -35,5 +38,4 @@ Thumbs.db
 
 # Build artifacts and external deps
 libsilent/
-tui/external/ftxui/
 nohup.out

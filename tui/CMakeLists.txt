@@ -10,13 +10,7 @@ find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(nlohmann_json 3.2.0 REQUIRED)
 
-# Build FTXUI library
-set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "Disable FTXUI examples" FORCE)
-set(FTXUI_BUILD_DOCS OFF CACHE BOOL "Disable FTXUI docs" FORCE)
-set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "Disable FTXUI install" FORCE)
-
-# Add FTXUI library
-add_subdirectory(external/ftxui)
+find_package(ftxui REQUIRED)
 
 # tui executable
 add_executable(tui
