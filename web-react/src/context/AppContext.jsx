@@ -6,7 +6,7 @@
 
 import { createContext, useContext, useReducer, useEffect, useLayoutEffect, useRef } from 'react';
 import { loadState, saveState as persistState, db, loadKeys, saveKeys, saveSessionKeys, loadPeerMessages } from '../lib/storage.js';
-import { registerAndLogin, refreshToken, pollMessages, connectWebSocket, sendWebSocketPing, handleIncomingMessage, processTextOrFileMessage } from '../lib/api.js';
+import { registerAndLogin, refreshToken, pollMessages, connectWebSocket, sendWebSocketPing, sendWebSocketCommand, handleIncomingMessage, processTextOrFileMessage } from '../lib/api.js';
 import { generateSalt, deriveAtRestKey } from '../lib/crypto.js';
 import { arrayBufferToPem, pemToArrayBuffer } from '../lib/utils.js';
 
@@ -45,6 +45,7 @@ const initialState = {
     isLoggedIn: false,
     isLoading: true,
     isWsConnected: false,
+    onlineStatus: {}, // { alias: 'ONLINE' | 'OFFLINE' }
     loginStatus: '',
     loginError: null
 };
@@ -103,6 +104,15 @@ function appReducer(state, action) {
 
         case 'SET_WS_CONNECTED':
             return { ...state, isWsConnected: action.connected };
+
+        case 'SET_ONLINE_STATUS':
+            return { 
+                ...state, 
+                onlineStatus: { 
+                    ...state.onlineStatus, 
+                    [action.peer]: action.status 
+                } 
+            };
 
         case 'LOGIN_SUCCESS':
             return {
@@ -230,6 +240,7 @@ export function AppProvider({ children }) {
     const [state, dispatch] = useReducer(appReducer, initialState);
     const stateRef = useRef(state);
     const loadingPeerRef = useRef(null);
+    const wsRef = useRef(null);
 
     useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -559,17 +570,20 @@ export function AppProvider({ children }) {
                 () => {
                     if (!isMounted) return;
                     dispatch({ type: 'SET_WS_CONNECTED', connected: false });
+                    wsRef.current = null;
                     stopPing();
                     startPolling();
                     reconnectTimeout = setTimeout(connect, 5000);
                 }
             );
+            wsRef.current = ws;
 
             const originalOpen = ws.onopen;
             ws.onopen = () => {
                 if (originalOpen) originalOpen();
                 if (!isMounted) return;
                 dispatch({ type: 'SET_WS_CONNECTED', connected: true });
+                wsRef.current = ws;
                 stopPolling();
                 const syncAbort = new AbortController();
                 pollMessages(stateRef.current, dispatch, syncAbort.signal)
@@ -583,11 +597,29 @@ export function AppProvider({ children }) {
         return () => {
             isMounted = false;
             if (ws) { ws.onclose = null; ws.close(); }
+            wsRef.current = null;
             stopPing();
             stopPolling();
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
         };
     }, [state.isLoggedIn, state.keyPair, state.token, state.atRestKey]);
+
+    // Online status subscription effect
+    useEffect(() => {
+        const ws = wsRef.current;
+        const peer = state.currentPeer;
+        const isWsConnected = state.isWsConnected;
+
+        if (!ws || !isWsConnected || !peer) return;
+
+        console.log(`[Presence] Subscribing to ${peer}`);
+        sendWebSocketCommand(ws, 'subscribe-to-online-status', { target_user: peer });
+
+        return () => {
+            console.log(`[Presence] Unsubscribing from ${peer}`);
+            sendWebSocketCommand(ws, 'unsubscribe-from-online-status', { target_user: peer });
+        };
+    }, [state.currentPeer, state.isWsConnected]);
 
     const exportIdentity = async () => {
         const { alias, keyPair } = stateRef.current;

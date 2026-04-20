@@ -585,6 +585,11 @@ export async function processTextOrFileMessage(msg, sender, session, dispatch, s
 
 // Shared message handler for WebSocket and Polling
 export async function handleIncomingMessage(msg, state, dispatch) {
+    if (msg.type === 'online_status') {
+        dispatch({ type: 'SET_ONLINE_STATUS', peer: msg.user, status: msg.status });
+        return;
+    }
+
     if (state.seenSignatures.has(msg.signature)) return;
 
     const sender = msg.senderAlias || 'Unknown';
@@ -695,10 +700,6 @@ export function connectWebSocket(token, onMessage, onError, onClose) {
     };
 
     ws.onmessage = (event) => {
-        if (event.data === 'pong') {
-            // console.log('[WS] Pong received');
-            return;
-        }
         try {
             const data = JSON.parse(event.data);
             onMessage(data);
@@ -720,9 +721,13 @@ export function connectWebSocket(token, onMessage, onError, onClose) {
     return ws;
 }
 
-export function sendWebSocketPing(ws) {
+export function sendWebSocketCommand(ws, cmd, args = {}) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send('ping');
+        ws.send(JSON.stringify({ cmd, arguments: args }));
     }
+}
+
+export function sendWebSocketPing(ws) {
+    sendWebSocketCommand(ws, 'ping');
 }
 

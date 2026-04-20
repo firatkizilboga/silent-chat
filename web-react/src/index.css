@@ -434,14 +434,31 @@ input, textarea {
     color: var(--text-muted);
 }
 
-/* Connection Indicator */
-.indicator-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    background: var(--accent-success);
-    border-radius: 50%;
-    animation: pulse 2s infinite;
+/* Presence-based Peer Name Styling */
+#chatPeerName {
+    transition: var(--transition-normal);
+}
+
+#chatPeerName.online {
+    color: var(--text-primary);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
+    animation: peerPulse 2s infinite;
+}
+
+#chatPeerName.offline {
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+#chatPeerName.unknown {
+    color: var(--text-muted);
+    opacity: 0.4;
+}
+
+@keyframes peerPulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
 }
 
 .login-container {
@@ -914,29 +931,6 @@ input, textarea {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-}
-
-.connection-indicator {
-    font-size: 0.75rem;
-    color: var(--accent-success);
-    animation: pulse 2s infinite;
-}
-
-.connection-indicator.disconnected {
-    color: var(--accent-error);
-    animation: none;
-}
-
-@keyframes pulse {
-
-    0%,
-    100% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.5;
-    }
 }
 
 /* ========================================
