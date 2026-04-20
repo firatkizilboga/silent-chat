@@ -27,6 +27,8 @@
             sqlite
             nlohmann_json
             ftxui
+            libssh
+            zlib
 
             # Development tools
             ccache
@@ -35,6 +37,9 @@
           ];
 
           shellHook = ''
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (with pkgs; [
+              zlib libssh openssl curl sqlite ftxui ncurses
+            ])}:/lib64:/usr/lib64:$LD_LIBRARY_PATH"
             echo "Silent Chat Development Environment"
             echo "====================================="
             echo "Build commands:"
@@ -60,6 +65,8 @@
             sqlite
             nlohmann_json
             ftxui
+            libssh
+            zlib
           ];
 
           cmakeFlags = [
@@ -69,6 +76,7 @@
           installPhase = ''
             mkdir -p $out/bin
             cp tui $out/bin/schatui
+            cp tui-ssh $out/bin/schatui-ssh
           '';
         };
       }

@@ -11,6 +11,7 @@ find_package(SQLite3 REQUIRED)
 find_package(nlohmann_json 3.2.0 REQUIRED)
 
 find_package(ftxui REQUIRED)
+find_package(libssh REQUIRED)
 
 # tui executable
 add_executable(tui
@@ -41,6 +42,35 @@ target_link_libraries(tui PRIVATE
 
 # Compiler warning flags
 target_compile_options(tui PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wshadow
+    -Wconversion
+)
+
+# tui-ssh executable (SSH server)
+add_executable(tui-ssh
+    src/main-server.cpp
+    src/ssh_server.cpp
+)
+
+target_include_directories(tui-ssh PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(tui-ssh PRIVATE
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    CURL::libcurl
+    SQLite::SQLite3
+    nlohmann_json::nlohmann_json
+    pthread
+    ssh
+    util
+)
+
+target_compile_options(tui-ssh PRIVATE
     -Wall
     -Wextra
     -Wpedantic
