@@ -13,8 +13,8 @@ find_package(nlohmann_json 3.2.0 REQUIRED)
 find_package(ftxui REQUIRED)
 find_package(libssh REQUIRED)
 
-# tui executable
-add_executable(tui
+# schatui executable
+add_executable(schatui
     src/main.cpp
     src/UI.cpp
     src/crypto.cpp
@@ -24,11 +24,11 @@ add_executable(tui
     src/app_db.cpp
 )
 
-target_include_directories(tui PRIVATE
+target_include_directories(schatui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(tui PRIVATE
+target_link_libraries(schatui PRIVATE
     ftxui::screen
     ftxui::dom
     ftxui::component
@@ -41,7 +41,7 @@ target_link_libraries(tui PRIVATE
 )
 
 # Compiler warning flags
-target_compile_options(tui PRIVATE
+target_compile_options(schatui PRIVATE
     -Wall
     -Wextra
     -Wpedantic
@@ -49,17 +49,17 @@ target_compile_options(tui PRIVATE
     -Wconversion
 )
 
-# tui-ssh executable (SSH server)
-add_executable(tui-ssh
+# schatui-ssh-server executable (SSH server)
+add_executable(schatui-ssh-server
     src/main-server.cpp
     src/ssh_server.cpp
 )
 
-target_include_directories(tui-ssh PRIVATE
+target_include_directories(schatui-ssh-server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(tui-ssh PRIVATE
+target_link_libraries(schatui-ssh-server PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
     CURL::libcurl
@@ -70,7 +70,7 @@ target_link_libraries(tui-ssh PRIVATE
     util
 )
 
-target_compile_options(tui-ssh PRIVATE
+target_compile_options(schatui-ssh-server PRIVATE
     -Wall
     -Wextra
     -Wpedantic
@@ -80,12 +80,12 @@ target_compile_options(tui-ssh PRIVATE
 
 # Add sanitizers for debug builds
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-    target_compile_options(tui PRIVATE
+    target_compile_options(schatui PRIVATE
         -fsanitize=address
         -fsanitize=undefined
         -fno-omit-frame-pointer
     )
-    target_link_options(tui PRIVATE
+    target_link_options(schatui PRIVATE
         -fsanitize=address
         -fsanitize=undefined
     )

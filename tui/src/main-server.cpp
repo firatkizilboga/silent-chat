@@ -38,10 +38,10 @@ int main(int argc, char* argv[])
 
     // tui binary lives next to tui-ssh
     std::filesystem::path self = std::filesystem::canonical(argv[0]);
-    std::string tuiBinary = (self.parent_path() / "tui").string();
+    std::string tuiBinary = (self.parent_path() / "schatui").string();
 
     if (!std::filesystem::exists(tuiBinary)) {
-        std::cerr << "[ERROR] tui binary not found at " << tuiBinary << "\n"
+        std::cerr << "[ERROR] schatui binary not found at " << tuiBinary << "\n"
                   << "        Build it with: cmake --build build\n";
         return 1;
     }

@@ -46,7 +46,7 @@
             echo "  cmake -B build -DCMAKE_BUILD_TYPE=Debug"
             echo "  cmake --build build"
             echo ""
-            echo "Run with: ./build/tui"
+            echo "Run with: ./build/schatui"
           '';
         };
 
@@ -75,8 +75,8 @@
 
           installPhase = ''
             mkdir -p $out/bin
-            cp tui $out/bin/schatui
-            cp tui-ssh $out/bin/schatui-ssh
+            cp schatui $out/bin/schatui
+            cp schatui-ssh-server $out/bin/schatui-ssh-server
           '';
         };
       }
