@@ -1,4 +1,5 @@
 #include "ssh_server.hpp"
+#include "config.hpp"
 #include "logger.hpp"
 
 #include <libssh/libssh.h>
@@ -43,6 +44,7 @@ struct ConnState {
     ssh_channel channel       = nullptr;
     struct winsize ws         = {24, 80, 0, 0};  // rows, cols
     bool        shellRequested = false;
+    std::string fingerprint;
 
     // Callbacks structs must outlive the session — keep them inline
     struct ssh_server_callbacks_struct  sessionCb{};
@@ -105,11 +107,34 @@ static int shellRequestCb(ssh_session, ssh_channel, void* userdata)
 
 // ── Session callbacks ─────────────────────────────────────────────────────────
 
-// Accept all auth unconditionally — public demo server
-static int authNoneCb(ssh_session, const char*, void*) { return SSH_AUTH_SUCCESS; }
-static int authPasswordCb(ssh_session, const char*, const char*, void*) { return SSH_AUTH_SUCCESS; }
-static int authPubkeyCb(ssh_session, const char*, struct ssh_key_struct*,
-                         char /*sig_state*/, void*) { return SSH_AUTH_SUCCESS; }
+static std::string keyFingerprintHex(struct ssh_key_struct* key) {
+    unsigned char* hash = nullptr;
+    size_t len = 0;
+    if (ssh_get_publickey_hash(key, SSH_PUBLICKEY_HASH_SHA256, &hash, &len) != SSH_OK)
+        return "unknown";
+    std::string hex;
+    hex.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", hash[i]);
+        hex += buf;
+    }
+    ssh_clean_pubkey_hash(&hash);
+    return hex;
+}
+
+// Accept any public key; capture fingerprint when signature is verified
+static int authPubkeyCb(ssh_session, const char*, struct ssh_key_struct* pubkey,
+                         char sig_state, void* userdata)
+{
+    if (sig_state == SSH_PUBLICKEY_STATE_NONE)
+        return SSH_AUTH_SUCCESS;  // client probing — accept the key offer
+    if (sig_state == SSH_PUBLICKEY_STATE_VALID) {
+        static_cast<ConnState*>(userdata)->fingerprint = keyFingerprintHex(pubkey);
+        return SSH_AUTH_SUCCESS;
+    }
+    return SSH_AUTH_DENIED;
+}
 
 // Client opens a session channel — create it and attach callbacks
 static ssh_channel channelOpenSessionCb(ssh_session session, void* userdata)
@@ -146,14 +171,11 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
 
     // Register server-level callbacks
     state.sessionCb.userdata                              = &state;
-    state.sessionCb.auth_none_function                    = authNoneCb;
-    state.sessionCb.auth_password_function                = authPasswordCb;
     state.sessionCb.auth_pubkey_function                  = authPubkeyCb;
     state.sessionCb.channel_open_request_session_function = channelOpenSessionCb;
     ssh_callbacks_init(&state.sessionCb);
     ssh_set_server_callbacks(session, &state.sessionCb);
-    ssh_set_auth_methods(session,
-        SSH_AUTH_METHOD_NONE | SSH_AUTH_METHOD_PASSWORD | SSH_AUTH_METHOD_PUBLICKEY);
+    ssh_set_auth_methods(session, SSH_AUTH_METHOD_PUBLICKEY);
 
     // Event-driven negotiation loop — blocks until shell is established
     ssh_event ev = ssh_event_new();
@@ -183,7 +205,10 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
     }
 
     if (childPid == 0) {
-        // Child: exec the plain tui binary (no --serve flag)
+        // Isolate this user's state under their SSH key fingerprint
+        std::string userXdg = (getServerStateDir() / "users" / state.fingerprint).string();
+        setenv("XDG_STATE_HOME", userXdg.c_str(), 1);
+
         const char* args[] = {tuiBinary.c_str(), nullptr};
         execv(tuiBinary.c_str(), const_cast<char* const*>(args));
         _exit(1);
