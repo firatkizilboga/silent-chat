@@ -20,7 +20,8 @@ int main(int argc, char* argv[])
     }
 
     // Logger
-    std::string logPath = silentchat::getConfigDir().string() + "/tui-ssh.log";
+    auto serverDir = silentchat::getServerStateDir();
+    std::string logPath = (serverDir / "server.log").string();
     try {
         silentchat::Logger::instance().init(logPath);
     } catch (const std::exception& e) {
@@ -28,7 +29,7 @@ int main(int argc, char* argv[])
     }
 
     // Host key
-    std::string keyPath = silentchat::getConfigDir().string() + "/ssh_host_key";
+    std::string keyPath = (serverDir / "ssh_host_key").string();
     if (!silentchat::ensureHostKey(keyPath)) {
         std::cerr << "[ERROR] Failed to generate/load SSH host key at "
                   << keyPath << "\n";
