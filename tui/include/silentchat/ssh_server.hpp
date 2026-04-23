@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <cstdint>
@@ -154,7 +155,7 @@ static inline ssh_channel channelOpenSessionCb(ssh_session session, void* userda
 
 // ── Single-connection handler ─────────────────────────────────────────────────
 
-static inline void handleClient(ssh_session session, const std::string& tuiBinary)
+static inline void handleClient(ssh_session session, const std::function<void()>& childMain)
 {
     if (ssh_handle_key_exchange(session) != SSH_OK) {
         LOG_ERROR("SSHServer", "Key exchange failed: " +
@@ -201,9 +202,8 @@ static inline void handleClient(ssh_session session, const std::string& tuiBinar
     if (childPid == 0) {
         std::string userXdg = (getServerStateDir() / "users" / state.fingerprint).string();
         setenv("XDG_STATE_HOME", userXdg.c_str(), 1);
-        const char* args[] = {tuiBinary.c_str(), nullptr};
-        execv(tuiBinary.c_str(), const_cast<char* const*>(args));
-        _exit(1);
+        childMain();
+        _exit(0);
     }
 
     state.masterFd = masterFd;
@@ -248,7 +248,7 @@ static inline void handleClient(ssh_session session, const std::string& tuiBinar
 
 inline void runSSHServer(uint16_t port,
                          const std::string& keyPath,
-                         const std::string& tuiBinary)
+                         const std::function<void()>& childMain)
 {
     signal(SIGPIPE, SIG_IGN);
 
@@ -272,8 +272,8 @@ inline void runSSHServer(uint16_t port,
             ssh_free(session);
             continue;
         }
-        std::thread([session, tuiBinary]() {
-            handleClient(session, tuiBinary);
+        std::thread([session, childMain]() {
+            handleClient(session, childMain);
         }).detach();
     }
 

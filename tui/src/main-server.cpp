@@ -1,10 +1,8 @@
 #include <silentchat/server.hpp>
 
-#include <filesystem>
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
-#include <string>
 
 int main(int argc, char* argv[])
 {
@@ -17,7 +15,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    // Logger
     auto serverDir = silentchat::getServerStateDir();
     std::string logPath = (serverDir / "server.log").string();
     try {
@@ -26,32 +23,24 @@ int main(int argc, char* argv[])
         std::cerr << "[ERROR] Logger init failed: " << e.what() << "\n";
     }
 
-    // Host key
     std::string keyPath = (serverDir / "ssh_host_key").string();
     if (!silentchat::ensureHostKey(keyPath)) {
-        std::cerr << "[ERROR] Failed to generate/load SSH host key at "
-                  << keyPath << "\n";
-        return 1;
-    }
-
-    // tui binary lives next to tui-ssh
-    std::filesystem::path self = std::filesystem::canonical(argv[0]);
-    std::string tuiBinary = (self.parent_path() / "schatui").string();
-
-    if (!std::filesystem::exists(tuiBinary)) {
-        std::cerr << "[ERROR] schatui binary not found at " << tuiBinary << "\n"
-                  << "        Build it with: cmake --build build\n";
+        std::cerr << "[ERROR] Failed to generate/load SSH host key at " << keyPath << "\n";
         return 1;
     }
 
     std::cout << "schatui SSH server starting on port " << port << "\n";
-    std::cout << "  tui binary : " << tuiBinary << "\n";
     std::cout << "  host key   : " << keyPath << "\n";
     std::cout << "  connect via: ssh -p " << port
               << " -o StrictHostKeyChecking=no any@localhost\n";
 
     try {
-        silentchat::runSSHServer(port, keyPath, tuiBinary);
+        silentchat::runSSHServer(port, keyPath, []() {
+            silentchat::Logger::instance().init(
+                (silentchat::getConfigDir() / "tui.log").string());
+            silentchat::UI ui;
+            ui.run();
+        });
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] " << e.what() << "\n";
         return 1;

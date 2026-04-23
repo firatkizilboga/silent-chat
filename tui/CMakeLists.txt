@@ -42,6 +42,9 @@ target_include_directories(schatui-ssh-server PRIVATE
 )
 
 target_link_libraries(schatui-ssh-server PRIVATE
+    ftxui::screen
+    ftxui::dom
+    ftxui::component
     OpenSSL::SSL
     OpenSSL::Crypto
     CURL::libcurl

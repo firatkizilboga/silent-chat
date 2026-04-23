@@ -1,8 +1,3 @@
-/**
- * tui - Silent Chat TUI Client
- * A terminal-based E2EE chat client using FTXUI
- */
-
 #include <silentchat/silentchat.hpp>
 
 #include <iostream>
