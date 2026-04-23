@@ -3,9 +3,7 @@
  * A terminal-based E2EE chat client using FTXUI
  */
 
-#include "UI.hpp"
-#include "config.hpp"
-#include "logger.hpp"
+#include <silentchat/silentchat.hpp>
 
 #include <iostream>
 

@@ -30,16 +30,12 @@ public:
             if (file_.is_open()) {
                 file_.close();
             }
-            
-            // Create parent directories if needed
             std::filesystem::path path(logPath);
             if (path.has_parent_path()) {
                 std::filesystem::create_directories(path.parent_path());
             }
-            
             file_.open(logPath, std::ios::out | std::ios::app);
         }
-        // Log session start AFTER releasing the lock
         if (file_.is_open()) {
             log(LogLevel::INFO, "Logger", "=== Log session started ===");
         }
@@ -51,7 +47,7 @@ public:
 
     void log(LogLevel level, const std::string& component, const std::string& message) {
         if (level < minLevel_) return;
-        
+
         std::lock_guard<std::mutex> lock(mutex_);
         if (!file_.is_open()) return;
 
@@ -114,7 +110,6 @@ private:
     LogLevel minLevel_ = LogLevel::DEBUG;
 };
 
-// Convenience macros
 #define LOG_DEBUG(component, msg) silentchat::Logger::instance().debug(component, msg)
 #define LOG_INFO(component, msg)  silentchat::Logger::instance().info(component, msg)
 #define LOG_WARN(component, msg)  silentchat::Logger::instance().warn(component, msg)

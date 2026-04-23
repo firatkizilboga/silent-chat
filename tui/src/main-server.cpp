@@ -1,6 +1,4 @@
-#include "ssh_server.hpp"
-#include "config.hpp"
-#include "logger.hpp"
+#include <silentchat/server.hpp>
 
 #include <filesystem>
 #include <iostream>

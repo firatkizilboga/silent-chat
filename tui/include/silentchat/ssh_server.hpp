@@ -1,6 +1,7 @@
-#include "ssh_server.hpp"
-#include "config.hpp"
-#include "logger.hpp"
+#pragma once
+
+#include <silentchat/config.hpp>
+#include <silentchat/logger.hpp>
 
 #include <libssh/libssh.h>
 #include <libssh/server.h>
@@ -15,15 +16,18 @@
 #include <signal.h>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
 #include <filesystem>
 #include <stdexcept>
+#include <string>
+#include <cstdint>
 #include <thread>
 
 namespace silentchat {
 
 // ── Host key ─────────────────────────────────────────────────────────────────
 
-bool ensureHostKey(const std::string& keyPath) {
+inline bool ensureHostKey(const std::string& keyPath) {
     namespace fs = std::filesystem;
     if (fs::exists(keyPath)) return true;
     std::error_code ec;
@@ -39,27 +43,25 @@ bool ensureHostKey(const std::string& keyPath) {
 // ── Per-connection state ──────────────────────────────────────────────────────
 
 struct ConnState {
-    int         masterFd      = -1;
-    pid_t       childPid      = -1;
-    ssh_channel channel       = nullptr;
-    struct winsize ws         = {24, 80, 0, 0};  // rows, cols
+    int         masterFd       = -1;
+    pid_t       childPid       = -1;
+    ssh_channel channel        = nullptr;
+    struct winsize ws          = {24, 80, 0, 0};
     bool        shellRequested = false;
     std::string fingerprint;
 
-    // Callbacks structs must outlive the session — keep them inline
     struct ssh_server_callbacks_struct  sessionCb{};
     struct ssh_channel_callbacks_struct channelCb{};
 };
 
-// ── Channel callbacks (defined before channelOpenSessionCb uses them) ─────────
+// ── Channel callbacks ─────────────────────────────────────────────────────────
 
-// SSH client → PTY master (child stdin)
-static int channelDataCb(ssh_session, ssh_channel,
-                         void* data, uint32_t len, int /*is_stderr*/,
-                         void* userdata)
+static inline int channelDataCb(ssh_session, ssh_channel,
+                                void* data, uint32_t len, int /*is_stderr*/,
+                                void* userdata)
 {
     auto* st = static_cast<ConnState*>(userdata);
-    if (st->masterFd < 0) return static_cast<int>(len);  // discard before shell
+    if (st->masterFd < 0) return static_cast<int>(len);
     ssize_t written = 0;
     while (written < static_cast<ssize_t>(len)) {
         ssize_t n = write(st->masterFd,
@@ -71,10 +73,9 @@ static int channelDataCb(ssh_session, ssh_channel,
     return static_cast<int>(written);
 }
 
-// Client resizes terminal
-static int windowChangeCb(ssh_session, ssh_channel,
-                           int cols, int rows, int /*pxw*/, int /*pxh*/,
-                           void* userdata)
+static inline int windowChangeCb(ssh_session, ssh_channel,
+                                  int cols, int rows, int /*pxw*/, int /*pxh*/,
+                                  void* userdata)
 {
     auto* st = static_cast<ConnState*>(userdata);
     if (st->masterFd < 0) return 0;
@@ -86,28 +87,26 @@ static int windowChangeCb(ssh_session, ssh_channel,
     return 0;
 }
 
-// Client requests PTY — capture terminal dimensions here (no deprecated APIs)
-static int ptyRequestCb(ssh_session, ssh_channel,
-                         const char* /*term*/,
-                         int width, int height, int /*pxw*/, int /*pxh*/,
-                         void* userdata)
+static inline int ptyRequestCb(ssh_session, ssh_channel,
+                                const char* /*term*/,
+                                int width, int height, int /*pxw*/, int /*pxh*/,
+                                void* userdata)
 {
     auto* st = static_cast<ConnState*>(userdata);
     if (width  > 0) st->ws.ws_col = static_cast<unsigned short>(width);
     if (height > 0) st->ws.ws_row = static_cast<unsigned short>(height);
-    return 0;  // accept
+    return 0;
 }
 
-// Client requests shell — signal the negotiation loop to proceed
-static int shellRequestCb(ssh_session, ssh_channel, void* userdata)
+static inline int shellRequestCb(ssh_session, ssh_channel, void* userdata)
 {
     static_cast<ConnState*>(userdata)->shellRequested = true;
-    return 0;  // accept
+    return 0;
 }
 
 // ── Session callbacks ─────────────────────────────────────────────────────────
 
-static std::string keyFingerprintHex(struct ssh_key_struct* key) {
+static inline std::string keyFingerprintHex(struct ssh_key_struct* key) {
     unsigned char* hash = nullptr;
     size_t len = 0;
     if (ssh_get_publickey_hash(key, SSH_PUBLICKEY_HASH_SHA256, &hash, &len) != SSH_OK)
@@ -123,12 +122,11 @@ static std::string keyFingerprintHex(struct ssh_key_struct* key) {
     return hex;
 }
 
-// Accept any public key; capture fingerprint when signature is verified
-static int authPubkeyCb(ssh_session, const char*, struct ssh_key_struct* pubkey,
-                         char sig_state, void* userdata)
+static inline int authPubkeyCb(ssh_session, const char*, struct ssh_key_struct* pubkey,
+                                char sig_state, void* userdata)
 {
     if (sig_state == SSH_PUBLICKEY_STATE_NONE)
-        return SSH_AUTH_SUCCESS;  // client probing — accept the key offer
+        return SSH_AUTH_SUCCESS;
     if (sig_state == SSH_PUBLICKEY_STATE_VALID) {
         static_cast<ConnState*>(userdata)->fingerprint = keyFingerprintHex(pubkey);
         return SSH_AUTH_SUCCESS;
@@ -136,11 +134,10 @@ static int authPubkeyCb(ssh_session, const char*, struct ssh_key_struct* pubkey,
     return SSH_AUTH_DENIED;
 }
 
-// Client opens a session channel — create it and attach callbacks
-static ssh_channel channelOpenSessionCb(ssh_session session, void* userdata)
+static inline ssh_channel channelOpenSessionCb(ssh_session session, void* userdata)
 {
     auto* st = static_cast<ConnState*>(userdata);
-    if (st->channel) return nullptr;  // one channel per connection
+    if (st->channel) return nullptr;
 
     st->channel = ssh_channel_new(session);
 
@@ -155,9 +152,9 @@ static ssh_channel channelOpenSessionCb(ssh_session session, void* userdata)
     return st->channel;
 }
 
-// ── Single-connection handler (runs in its own thread) ────────────────────────
+// ── Single-connection handler ─────────────────────────────────────────────────
 
-static void handleClient(ssh_session session, const std::string& tuiBinary)
+static inline void handleClient(ssh_session session, const std::string& tuiBinary)
 {
     if (ssh_handle_key_exchange(session) != SSH_OK) {
         LOG_ERROR("SSHServer", "Key exchange failed: " +
@@ -169,7 +166,6 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
 
     ConnState state;
 
-    // Register server-level callbacks
     state.sessionCb.userdata                              = &state;
     state.sessionCb.auth_pubkey_function                  = authPubkeyCb;
     state.sessionCb.channel_open_request_session_function = channelOpenSessionCb;
@@ -177,7 +173,6 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
     ssh_set_server_callbacks(session, &state.sessionCb);
     ssh_set_auth_methods(session, SSH_AUTH_METHOD_PUBLICKEY);
 
-    // Event-driven negotiation loop — blocks until shell is established
     ssh_event ev = ssh_event_new();
     ssh_event_add_session(ev, session);
 
@@ -191,7 +186,6 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
         }
     }
 
-    // ── Fork a tui process inside a PTY ──────────────────────────────────────
     int   masterFd = -1;
     pid_t childPid = forkpty(&masterFd, nullptr, nullptr, &state.ws);
 
@@ -205,30 +199,23 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
     }
 
     if (childPid == 0) {
-        // Isolate this user's state under their SSH key fingerprint
         std::string userXdg = (getServerStateDir() / "users" / state.fingerprint).string();
         setenv("XDG_STATE_HOME", userXdg.c_str(), 1);
-
         const char* args[] = {tuiBinary.c_str(), nullptr};
         execv(tuiBinary.c_str(), const_cast<char* const*>(args));
         _exit(1);
     }
 
-    // Parent: update shared state so callbacks can write to the PTY
     state.masterFd = masterFd;
     state.childPid = childPid;
-
     fcntl(masterFd, F_SETFL, O_NONBLOCK);
 
-    // ── Bidirectional I/O bridge ──────────────────────────────────────────────
     bool running = true;
     char buf[4096];
 
     while (running) {
-        // Process SSH packets → fires channelDataCb / windowChangeCb
         if (ssh_event_dopoll(ev, 10) == SSH_ERROR) break;
 
-        // Drain PTY master (child stdout) → SSH channel → client terminal
         for (;;) {
             ssize_t n = read(masterFd, buf, sizeof(buf));
             if (n > 0) {
@@ -236,7 +223,7 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
             } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                 break;
             } else {
-                running = false;  // EIO: child exited
+                running = false;
                 break;
             }
         }
@@ -246,7 +233,6 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
     }
 
     ssh_event_free(ev);
-
     ssh_channel_send_eof(state.channel);
     ssh_channel_close(state.channel);
     ssh_channel_free(state.channel);
@@ -260,9 +246,9 @@ static void handleClient(ssh_session session, const std::string& tuiBinary)
 
 // ── Server accept loop ────────────────────────────────────────────────────────
 
-void runSSHServer(uint16_t port,
-                  const std::string& keyPath,
-                  const std::string& tuiBinary)
+inline void runSSHServer(uint16_t port,
+                         const std::string& keyPath,
+                         const std::string& tuiBinary)
 {
     signal(SIGPIPE, SIG_IGN);
 
