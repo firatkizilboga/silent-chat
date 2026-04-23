@@ -19,6 +19,7 @@
             gnumake
             gcc
             clang
+            clang-tools
 
             # Required libraries
             ncurses
